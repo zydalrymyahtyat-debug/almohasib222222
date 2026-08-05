@@ -1,20 +1,41 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+تطوير زيد الريمي
 
-# Run and deploy your AI Studio app
+<div align="center">🚀 تطوير زيد الريمي
 
-This contains everything you need to run your app locally.
+تم تطوير هذا المشروع بواسطة زيد الريمي
 
-View your app in AI Studio: https://ai.studio/apps/db7ff391-2a0c-4876-93d1-54786fe87cc5
+</div>---
 
-## Run Locally
+نبذة عن المشروع
 
-**Prerequisites:**  Node.js
+هذا المشروع تم تطويره بواسطة زيد الريمي، ويهدف إلى توفير تطبيق يعمل بكفاءة وسهولة، مع إمكانية تشغيله محليًا أو تطويره لاحقًا.
 
+---
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+متطلبات التشغيل
+
+- Node.js (الإصدار الحديث)
+
+---
+
+طريقة التشغيل
+
+1. تثبيت الحزم:
+
+npm install
+
+2. إنشاء ملف ".env.local" وإضافة مفتاح Gemini API:
+
+GEMINI_API_KEY=YOUR_API_KEY
+
+3. تشغيل المشروع:
+
+npm run dev
+
+---
+
+المطور
+
+👨‍💻 تطوير: زيد الريمي
+
+جميع الحقوق محفوظة © 2026
