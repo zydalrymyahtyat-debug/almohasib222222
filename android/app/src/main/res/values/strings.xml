@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">الدفتر الآمن</string>
+    <string name="title_activity_main">الدفتر الآمن</string>
+    <string name="package_name">com.secure.notebook</string>
+    <string name="custom_url_scheme">com.secure.notebook</string>
+</resources>

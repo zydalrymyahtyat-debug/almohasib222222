@@ -1,0 +1,6 @@
+{
+  "name": "الدفتر الآمن - الإصدار الشامل",
+  "description": "تطبيق الدفتر الآمن لإدارة حسابات الموردين والعملاء والموظفين والمشاريع الخدمية مثل آبار المياه ومزارع القات بكفاءة عالية وأمان تام",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

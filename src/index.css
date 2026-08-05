@@ -1,0 +1,106 @@
+@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Almarai:wght@400;700;800&family=Inter:wght@400;500;600&display=swap");
+
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  background-color: #0f172a;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom styles for glowing gradient borders */
+@keyframes custom-border-spin {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.glowing-border-card {
+  border: 1.5px solid transparent;
+  background: linear-gradient(#ffffff, #ffffff) padding-box, 
+              linear-gradient(60deg, #1e293b, #15803d, #ffffff, #b91c1c, #1e293b) border-box;
+  background-size: 100% 100%, 300% 300%;
+  animation: custom-border-spin 8s linear infinite;
+}
+
+/* Print styles */
+@media print {
+  html, body {
+    background: white !important;
+    background-color: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  /* Hide all siblings of #print-area inside the React layout wrapper */
+  #root > div > :not(#print-area) {
+    display: none !important;
+  }
+  
+  /* Hide any other root siblings */
+  #root > :not(div) {
+    display: none !important;
+  }
+  
+  /* Ensure parent containers do not force backgrounds or scrolls */
+  #root, #root > div {
+    background: white !important;
+    background-color: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+  
+  #print-area {
+    display: block !important;
+    position: relative !important;
+    width: 100% !important;
+    background: white !important;
+    background-color: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+/* Hide print area on screen */
+@media screen {
+  #print-area {
+    display: none !important;
+  }
+}
+
+/* Wave animation */
+@keyframes calmWave {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.calm-wave-bg {
+  background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a, #111827);
+  background-size: 400% 400%;
+  animation: calmWave 15s ease infinite;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.4);
+}

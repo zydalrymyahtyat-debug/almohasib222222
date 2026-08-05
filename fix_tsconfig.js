@@ -1,0 +1,5 @@
+import fs from 'fs';
+let tsconfig = JSON.parse(fs.readFileSync('tsconfig.json', 'utf8'));
+tsconfig.exclude = ["android", "dist", "node_modules"];
+fs.writeFileSync('tsconfig.json', JSON.stringify(tsconfig, null, 2));
+console.log("Updated tsconfig.json");
