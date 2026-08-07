@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, collection, query, where, getDocs, addDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot, collection, query, where, getDocs, addDoc, updateDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { UserProfile, Well } from "./types";
 import { motion, AnimatePresence } from "motion/react";
@@ -309,13 +309,32 @@ export default function App() {
             allowed = [(data as any).deviceId];
           }
 
-          // BACKWARD COMPATIBILITY: Do not sign out if no device data exists AT ALL (legacy account)
-          // The AuthScreen will handle registering this device on their next login or right now
+          // BACKWARD COMPATIBILITY: If no device data exists AT ALL (legacy account), auto-register it now in background
+          if (allowed.length === 0 && !(data as any).deviceId) {
+            allowed = [uuid];
+            // Update firestore in background so we don't block
+            setDoc(doc(db, "users", currentUser.uid), { allowedDevices: allowed }, { merge: true }).catch(console.error);
+          }
+
           if (allowed.length > 0 && !allowed.includes(uuid)) {
              // Device is no longer allowed or was never allowed (caught on resume/realtime)
              if (navigator.onLine) {
+                // Submit a device request BEFORE signing out
+                try {
+                   await addDoc(collection(db, "deviceRequests"), {
+                     userId: currentUser.uid,
+                     email: currentUser.email || "",
+                     name: data.name || "مستخدم",
+                     deviceId: uuid,
+                     status: "pending",
+                     timestamp: serverTimestamp()
+                   });
+                } catch(reqErr) {
+                   console.error("Failed to submit background device request", reqErr);
+                }
+
                 await auth.signOut();
-                alert("تم تسجيل الخروج: هذا الجهاز غير مصرح له.");
+                alert("تم تسجيل الخروج: هذا الجهاز غير مصرح له. تم إرسال طلب للإدارة، يرجى الانتظار.");
              }
              return;
           }
