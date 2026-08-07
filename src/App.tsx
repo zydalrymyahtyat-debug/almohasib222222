@@ -12,6 +12,7 @@ import {
 import { App as CapApp } from "@capacitor/app";
 import { RootDetection } from "@capawesome/capacitor-root-detection";
 import { Capacitor } from "@capacitor/core";
+import { Device } from "@capacitor/device";
 import { sendLocalNotification } from "./utils/notificationHelper";
 
 // Components
@@ -294,9 +295,34 @@ export default function App() {
     // setAppReady(false); // Removed to avoid blocking UI on reconnects/offline
     const userDocRef = doc(db, "users", currentUser.uid);
 
-    const unsubscribe = onSnapshot(userDocRef, { includeMetadataChanges: true }, (snap) => {
+    const unsubscribe = onSnapshot(userDocRef, { includeMetadataChanges: true }, async (snap) => {
       if (snap.exists()) {
         const data = snap.data() as UserProfile;
+
+        // Perform Device Validation in real-time
+        try {
+          const deviceId = await Device.getId();
+          const uuid = deviceId.identifier;
+
+          let allowed = (data as any).allowedDevices || [];
+          if (allowed.length === 0 && (data as any).deviceId) {
+            allowed = [(data as any).deviceId];
+          }
+
+          // BACKWARD COMPATIBILITY: Do not sign out if no device data exists AT ALL (legacy account)
+          // The AuthScreen will handle registering this device on their next login or right now
+          if (allowed.length > 0 && !allowed.includes(uuid)) {
+             // Device is no longer allowed or was never allowed (caught on resume/realtime)
+             if (navigator.onLine) {
+                await auth.signOut();
+                alert("تم تسجيل الخروج: هذا الجهاز غير مصرح له.");
+             }
+             return;
+          }
+        } catch(e) {
+          console.error("Device ID check failed", e);
+        }
+
         setUserProfile(data);
 
         // Cache the profile minus any non-serializable fields if needed (dates are serialized by firestore if we just use strings or we stringify the object)
