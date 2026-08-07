@@ -45,10 +45,16 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
 
           // Migrate old single deviceId to allowedDevices array if needed
           let allowed = userData.allowedDevices || [];
+
           if (userData.deviceId && allowed.length === 0) {
             allowed = [userData.deviceId];
             // Don't await this, just let it update in the background
             setDoc(doc(db, "users", userCredential.user.uid), { allowedDevices: allowed }, { merge: true });
+          } else if (allowed.length === 0 && !userData.deviceId) {
+            // BACKWARD COMPATIBILITY: Existing user with no device binding data at all.
+            // Register this current device as their first allowed device automatically.
+            allowed = [uuid];
+            await setDoc(doc(db, "users", userCredential.user.uid), { allowedDevices: allowed }, { merge: true });
           }
 
           if (allowed.length > 0 && !allowed.includes(uuid)) {
@@ -70,9 +76,6 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
             }
 
             throw new Error("هذا الجهاز غير مصرح له. تم إرسال طلب للإدارة للموافقة عليه، يرجى الانتظار والمحاولة لاحقاً.");
-          } else if (allowed.length === 0) {
-            // First time login for existing user without any device ID
-            await setDoc(doc(db, "users", userCredential.user.uid), { allowedDevices: [uuid] }, { merge: true });
           }
         }
 
