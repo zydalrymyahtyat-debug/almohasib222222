@@ -94,6 +94,9 @@ export default function StatementView({ currentUser, personId, personName, perso
   const [wPaid, setWPaid] = useState("");
   const [wNote, setWNote] = useState("");
 
+  // Keep track of latest person state for the auto-align logic
+  const personRef = React.useRef<Person | null>(null);
+
   useEffect(() => {
     if (!currentUser || !personId) return;
     setLoading(true);
@@ -102,7 +105,9 @@ export default function StatementView({ currentUser, personId, personName, perso
     const personUnsub = onSnapshot(doc(db, "persons", personId), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        setPerson({ id: snapshot.id, ...data } as Person);
+        const p = { id: snapshot.id, ...data } as Person;
+        setPerson(p);
+        personRef.current = p;
         
         // Initialize editing fields
         setEditName(data.name || "");
@@ -143,7 +148,8 @@ export default function StatementView({ currentUser, personId, personName, perso
       setLoading(false);
 
       // Auto-align database balance if mismatch occurs (highly robust pattern)
-      if (person && person.balance !== totalCalculatedBalance) {
+      const currentPerson = personRef.current;
+      if (currentPerson && currentPerson.balance !== totalCalculatedBalance) {
         updateDoc(doc(db, "persons", personId), { balance: totalCalculatedBalance }).catch(console.error);
       }
     });
