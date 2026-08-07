@@ -58,10 +58,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           }
 
           if (allowed.length > 0 && !allowed.includes(uuid)) {
-            // Sign out the user immediately if device ID doesn't match
-            await auth.signOut();
-
-            // Create a device approval request for the admin
+            // Create a device approval request for the admin BEFORE signing out
             try {
                await addDoc(collection(db, "deviceRequests"), {
                  userId: userCredential.user.uid,
@@ -74,6 +71,9 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
             } catch(e) {
                console.error("Failed to send device request", e);
             }
+
+            // Sign out the user immediately if device ID doesn't match
+            await auth.signOut();
 
             throw new Error("هذا الجهاز غير مصرح له. تم إرسال طلب للإدارة للموافقة عليه، يرجى الانتظار والمحاولة لاحقاً.");
           }
