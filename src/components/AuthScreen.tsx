@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { setDoc, doc } from "firebase/firestore";
+import { setDoc, doc, getDoc } from "firebase/firestore";
+import { Device } from "@capacitor/device";
 import { motion, AnimatePresence } from "motion/react";
 import { Lock, Mail, User, Phone, CheckCircle, MessageSquare } from "lucide-react";
 
@@ -32,13 +33,28 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     setError("");
 
     try {
+      const deviceId = await Device.getId();
+      const uuid = deviceId.identifier;
+
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
+
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          if (userData.deviceId && userData.deviceId !== uuid) {
+            // Sign out the user immediately if device ID doesn't match
+            await auth.signOut();
+            throw new Error("لا يمكن تسجيل الدخول من هذا الجهاز. يرجى التواصل مع الإدارة.");
+          } else if (!userData.deviceId) {
+            // First time login for existing user without device ID
+            await setDoc(doc(db, "users", userCredential.user.uid), { deviceId: uuid }, { merge: true });
+          }
+        }
 
         // Always save biometric credentials on successful login (for both native and web environments!)
         localStorage.setItem("saved_email", email);
         // localStorage.setItem("saved_password", password); // REMOVED FOR SECURITY (PlainText Password Storage)
-
 
         onAuthSuccess();
       } else {
@@ -57,7 +73,8 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           status: "active",
           subscriptionEnd: oneMonthLater,
           createdAt: new Date(),
-          photoURL: ""
+          photoURL: "",
+          deviceId: uuid // Store device ID on registration
         };
 
         await setDoc(doc(db, "users", res.user.uid), userData);
