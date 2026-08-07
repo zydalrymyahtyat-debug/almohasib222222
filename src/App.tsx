@@ -10,6 +10,7 @@ import {
   X, Search, Phone, Clock
 } from "lucide-react";
 import { App as CapApp } from "@capacitor/app";
+import { RootDetection } from "@capawesome/capacitor-root-detection";
 import { Capacitor } from "@capacitor/core";
 import { sendLocalNotification } from "./utils/notificationHelper";
 
@@ -99,6 +100,24 @@ export default function App() {
       window.removeEventListener("open-overdue-modal" as any, handleOpenOverdueModal);
       window.removeEventListener("open-calculator" as any, handleOpenCalculator);
     };
+  }, []);
+
+  // Root Detection on Startup
+  useEffect(() => {
+    const checkRootStatus = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const result = await RootDetection.isRooted();
+          if ((result as any).isRooted || (result as any).rooted) {
+            alert("خطأ أمني: تم اكتشاف محاولة للعبث بالنظام أو بيئة غير آمنة. سيتم إغلاق التطبيق.");
+            await CapApp.exitApp();
+          }
+        } catch (e) {
+          console.error("Root check failed", e);
+        }
+      }
+    };
+    checkRootStatus();
   }, []);
 
   // Monitor overdue debt status in real-time

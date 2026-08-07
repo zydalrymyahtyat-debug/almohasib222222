@@ -20,6 +20,7 @@
     "@capacitor/core": "^8.4.1",
     "@capacitor/device": "^8.0.3",
     "@capacitor/local-notifications": "^8.2.0",
+    "@capawesome/capacitor-root-detection": "^0.1.1",
     "@google/genai": "^2.4.0",
     "@vitejs/plugin-react": "^5.0.4",
     "capacitor-native-biometric": "^4.2.2",
