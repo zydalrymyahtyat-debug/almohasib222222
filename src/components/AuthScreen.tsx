@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { setDoc, doc, getDoc } from "firebase/firestore";
+import { setDoc, doc, getDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { Device } from "@capacitor/device";
 import { motion, AnimatePresence } from "motion/react";
 import { Lock, Mail, User, Phone, CheckCircle, MessageSquare } from "lucide-react";
@@ -42,13 +42,37 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
 
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          if (userData.deviceId && userData.deviceId !== uuid) {
+
+          // Migrate old single deviceId to allowedDevices array if needed
+          let allowed = userData.allowedDevices || [];
+          if (userData.deviceId && allowed.length === 0) {
+            allowed = [userData.deviceId];
+            // Don't await this, just let it update in the background
+            setDoc(doc(db, "users", userCredential.user.uid), { allowedDevices: allowed }, { merge: true });
+          }
+
+          if (allowed.length > 0 && !allowed.includes(uuid)) {
             // Sign out the user immediately if device ID doesn't match
             await auth.signOut();
-            throw new Error("لا يمكن تسجيل الدخول من هذا الجهاز. يرجى التواصل مع الإدارة.");
-          } else if (!userData.deviceId) {
-            // First time login for existing user without device ID
-            await setDoc(doc(db, "users", userCredential.user.uid), { deviceId: uuid }, { merge: true });
+
+            // Create a device approval request for the admin
+            try {
+               await addDoc(collection(db, "deviceRequests"), {
+                 userId: userCredential.user.uid,
+                 email: email,
+                 name: userData.name || "مستخدم",
+                 deviceId: uuid,
+                 status: "pending",
+                 timestamp: serverTimestamp()
+               });
+            } catch(e) {
+               console.error("Failed to send device request", e);
+            }
+
+            throw new Error("هذا الجهاز غير مصرح له. تم إرسال طلب للإدارة للموافقة عليه، يرجى الانتظار والمحاولة لاحقاً.");
+          } else if (allowed.length === 0) {
+            // First time login for existing user without any device ID
+            await setDoc(doc(db, "users", userCredential.user.uid), { allowedDevices: [uuid] }, { merge: true });
           }
         }
 
@@ -74,7 +98,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           subscriptionEnd: oneMonthLater,
           createdAt: new Date(),
           photoURL: "",
-          deviceId: uuid // Store device ID on registration
+          allowedDevices: [uuid] // Store device ID in array on registration
         };
 
         await setDoc(doc(db, "users", res.user.uid), userData);
