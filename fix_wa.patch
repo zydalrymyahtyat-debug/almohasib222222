@@ -1,0 +1,10 @@
+--- src/components/StatementView.tsx
++++ src/components/StatementView.tsx
+@@ -224,6 +224,7 @@
+     }
+
+     const encoded = encodeURIComponent(message);
++    localStorage.setItem("ignore_app_lock", "true"); // Prevent locking when switching to WhatsApp/SMS/Dialer
+     if (method === "wa") {
+       window.open(`https://wa.me/${phoneClean}?text=${encoded}`, "_blank");
+     } else if (method === "sms") {
