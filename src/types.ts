@@ -36,6 +36,7 @@ export interface Person {
   region?: string;       // Well/Qat fields
   fieldsCount?: string;  // Well/Qat fields
   wellId?: string;       // ID of the specific well
+  lastTransactionAt?: Timestamp; // For cached person lists
 }
 
 export type TransactionType =
@@ -60,6 +61,7 @@ export interface Transaction {
   section: AccountType;
   createdAt: Timestamp;
   wellId?: string;
+  date?: Timestamp;
 }
 
 export interface Expense {
@@ -72,6 +74,7 @@ export interface Expense {
   wellId?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+  date?: Timestamp;
 }
 
 export interface InventoryItem {
@@ -109,4 +112,5 @@ export interface CashTransaction {
   source: string; // e.g. "cash", "bank1"
   destination?: string; // used for transfer
   createdAt: Timestamp;
+  date?: Timestamp;
 }

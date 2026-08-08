@@ -92,6 +92,7 @@ export default function Dashboard({ currentUser, userProfile, onToggleSidebar, o
       });
 
       setTotals({ لك: totalLek, عليك: totalAlek });
+      localStorage.setItem("cached_dashboard_totals", JSON.stringify({ لك: totalLek, عليك: totalAlek }));
       setLoading(false);
     });
 
