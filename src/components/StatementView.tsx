@@ -224,6 +224,7 @@ export default function StatementView({ currentUser, personId, personName, perso
     }
 
     const encoded = encodeURIComponent(message);
+    localStorage.setItem("ignore_app_lock", "true"); // Prevent locking when switching to WhatsApp/SMS/Dialer
     if (method === "wa") {
       window.open(`https://wa.me/${phoneClean}?text=${encoded}`, "_blank");
     } else if (method === "sms") {
