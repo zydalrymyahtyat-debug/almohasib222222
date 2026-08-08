@@ -1,4 +1,4 @@
-name: بناء ملف APK لتطبيق الدفتر الآمن 📱
+name: بناء ملف AAB لتطبيق الدفتر الآمن 📱
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-apk:
-    name: بناء تطبيق الأندرويد (APK)
+  build-aab:
+    name: بناء تطبيق الأندرويد (AAB)
     runs-on: ubuntu-latest
 
     steps:
@@ -57,11 +57,11 @@ jobs:
       - name: Grant Execute Permission 🔑
         run: chmod +x android/gradlew
 
-      # بناء APK
-      - name: Build Android APK 🚀
+      # بناء AAB
+      - name: Build Android AAB 🚀
         run: |
           cd android
-          ./gradlew assembleDebug
+          ./gradlew bundleRelease
 
       # إنشاء Tag تلقائي
       - name: Generate Tag 🏷️
@@ -73,16 +73,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: APK Build ${{ steps.tag.outputs.tag }}
+          name: AAB Build ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # رفع APK إلى Releases
-      - name: Upload APK to Release 📦
+      # رفع AAB إلى Releases
+      - name: Upload AAB to Release 📦
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: android/app/build/outputs/bundle/release/app-release.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
