@@ -1,4 +1,4 @@
-package com.amsayz.daftarhesabak;
+package com.amsayz.fatrhesabak;
 
 import android.os.Bundle;
 import android.webkit.WebView;
