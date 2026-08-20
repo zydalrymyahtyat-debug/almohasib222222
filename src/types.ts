@@ -31,6 +31,7 @@ export interface Person {
   phone: string;
   balance: number; // positive = عليه (debt), negative = له (credit)
   createdAt: Timestamp;
+  gender?: "male" | "female"; // Customers/Persons gender for messages
   company?: string;      // Suppliers only
   salary?: number;       // Employees only
   region?: string;       // Well/Qat fields

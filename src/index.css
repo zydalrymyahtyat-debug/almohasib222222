@@ -9,6 +9,16 @@ html, body {
   background-color: #0f172a;
   margin: 0;
   padding: 0;
+  -webkit-user-select: none; /* Safari */
+  -ms-user-select: none; /* IE 10 and IE 11 */
+  user-select: none; /* Standard syntax */
+}
+
+/* Allow selection in input and textarea fields */
+input, textarea {
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 }
 
 /* Custom styles for glowing gradient borders */

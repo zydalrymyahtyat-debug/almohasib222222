@@ -71,6 +71,7 @@ export default function ListView({ currentUser, section, title, onNavigateStatem
   // Person Form state
   const [pName, setPName] = useState("");
   const [pPhone, setPPhone] = useState("");
+  const [pGender, setPGender] = useState<"male" | "female">("male");
   const [pCompany, setPCompany] = useState("");
   const [pSalary, setPSalary] = useState("");
   const [pRegion, setPRegion] = useState("");
@@ -179,6 +180,7 @@ export default function ListView({ currentUser, section, title, onNavigateStatem
     setEditId("");
     setPName("");
     setPPhone("");
+    setPGender("male");
     setPCompany("");
     setPSalary("");
     setPRegion("");
@@ -203,6 +205,7 @@ export default function ListView({ currentUser, section, title, onNavigateStatem
     setEditId(p.id);
     setPName(p.name);
     setPPhone(p.phone || "");
+    setPGender(p.gender || "male");
     setPCompany(p.company || "");
     setPSalary(p.salary ? String(p.salary) : "");
     setPRegion(p.region || "");
@@ -404,6 +407,7 @@ export default function ListView({ currentUser, section, title, onNavigateStatem
         const personData: any = {
           name: pName.trim(),
           phone: pPhone.trim(),
+          gender: pGender,
           region: pRegion.trim(),
           fieldsCount: pFieldsCount.trim()
         };
@@ -701,6 +705,36 @@ export default function ListView({ currentUser, section, title, onNavigateStatem
                         </button>
                       </div>
                     </div>
+
+                    {section === "customers" && (
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">النوع / الجنس</label>
+                        <div className="flex gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value="male"
+                              checked={pGender === "male"}
+                              onChange={(e) => setPGender(e.target.value as "male" | "female")}
+                              className="w-4 h-4 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                            />
+                            <span className="text-sm font-bold text-slate-700">ذكر (السيد)</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value="female"
+                              checked={pGender === "female"}
+                              onChange={(e) => setPGender(e.target.value as "male" | "female")}
+                              className="w-4 h-4 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                            />
+                            <span className="text-sm font-bold text-slate-700">أنثى (السيدة)</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
 
                     {section === "suppliers" && (
                       <div>

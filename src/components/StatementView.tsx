@@ -66,6 +66,9 @@ export default function StatementView({ currentUser, personId, personName, perso
   const [isWellOpOpen, setIsWellOpOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // WhatsApp Share Modal
+  const [isWaOptionsOpen, setIsWaOptionsOpen] = useState(false);
+
   // Edit Person Form
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
@@ -174,7 +177,7 @@ export default function StatementView({ currentUser, personId, personName, perso
   const statusLabel = person.balance > 0 ? "(عليه)" : person.balance < 0 ? "(له)" : "(مصفر)";
 
   // Standard platform communication intents
-  const handleCommunication = (method: "wa" | "sms" | "call") => {
+  const handleCommunication = (method: "wa" | "sms" | "call", waSendType: "all" | "last" | "recent" = "all") => {
     if (!person.phone) {
       alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل خاصية المراسلة.");
       return;
@@ -191,34 +194,54 @@ export default function StatementView({ currentUser, personId, personName, perso
     const userName = userProfileName();
     const balanceWord = person.balance > 0 ? "عليك" : person.balance < 0 ? "لك" : "مصفر";
     const balanceTextStr = person.balance > 0 ? `عليك ${absBal.toLocaleString('en-US')} ر.ي` : person.balance < 0 ? `لك ${absBal.toLocaleString('en-US')} ر.ي` : "الحساب مصفر";
-    const personLabel = section === "qat_fields" ? "المشروع" : "السيد/ة";
+
+    // Determine the title based on gender and section
+    let personLabel = "السيد/ة";
+    if (section === "qat_fields") {
+      personLabel = "المشروع";
+    } else if (person.gender === "male") {
+      personLabel = "السيد";
+    } else if (person.gender === "female") {
+      personLabel = "السيدة";
+    }
  
     let message = "";
     if (method === "wa") {
-      message = `*تطبيق الدفتر الآمن - كشف حساب*\n`;
-      message += `إصدار: *${userName}*\n`;
-      message += `التاريخ: ${new Date().toLocaleDateString("ar-EG")}\n\n`;
-      message += `*${personLabel}:* ${person.name}\n`;
-      message += `*الرصيد الإجمالي:* ${absBal.toLocaleString('en-US')} ر.ي (${balanceWord})\n\n`;
-      message += `*--- سجل العمليات المؤخرة ---*\n`;
- 
+      message = `تطبيق الدفتر الآمن\n`;
+      message += `📋 كشف حساب\n\n`;
+      message += `${personLabel} ${person.name}\n`;
+      message += `💰 الرصيد الحالي: ${absBal.toLocaleString('en-US')} ر.ي${person.balance === 0 ? "" : person.balance > 0 ? " (عليه)" : " (له)"}\n\n`;
+
       if (transactions.length === 0) {
         message += `لا توجد عمليات مقيدة.\n`;
       } else {
-        // Add last 5 transactions for readability on whatsapp
-        transactions.slice(0, 8).forEach((t) => {
-          const typesMap: any = {
-            debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
-            deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
-            well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
-          };
+        const typesMap: any = {
+          debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
+          deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
+          well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
+        };
+
+        let transToSend = transactions;
+        if (waSendType === "last") {
+          message += `آخر عملية:\n`;
+          transToSend = transactions.slice(0, 1);
+        } else if (waSendType === "recent") {
+          message += `العمليات الأخيرة:\n`;
+          transToSend = transactions.slice(0, 5); // arbitrarily sending last 5 for recent
+        } else {
+           message += `سجل العمليات:\n`;
+           // Send all
+        }
+
+        transToSend.forEach((t) => {
           const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
           const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
-          message += `🔹 *${typesMap[t.type] || "عملية"}* (${date})\n`;
-          if (t.note) message += `📝 ${t.note}\n`;
-          message += `💰 ${isDebit ? "+" : "-"} ${t.amount.toLocaleString('en-US')} ر.ي\n\n`;
+          message += `🔹 ${typesMap[t.type] || "عملية"} — ${t.note || "بدون بيان"}\n`;
+          message += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
+          message += `📅 ${date}\n\n`;
         });
       }
+      message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
     } else {
       message = `مرحباً ${person.name}،\nنفيدكم بأن رصيد حسابكم الحالي لدينا في نظام الدفتر الآمن هو: ${balanceTextStr}`;
     }
@@ -232,6 +255,9 @@ export default function StatementView({ currentUser, personId, personName, perso
     } else if (method === "call") {
       window.open(`tel:+${phoneClean}`, "_blank");
     }
+
+    // Close the options modal if it was open
+    setIsWaOptionsOpen(false);
   };
 
   const userProfileName = () => {
@@ -740,7 +766,7 @@ export default function StatementView({ currentUser, personId, personName, perso
           {person.phone && (
             <>
               <button
-                onClick={() => handleCommunication("wa")}
+                onClick={() => setIsWaOptionsOpen(true)}
                 className="flex-1 py-3 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-emerald-500/10 cursor-pointer"
                 title="مراسلة واتس اب"
               >
@@ -1285,6 +1311,58 @@ export default function StatementView({ currentUser, personId, personName, perso
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+        {/* WhatsApp Send Options Modal */}
+        {isWaOptionsOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsWaOptionsOpen(false)}></div>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 p-6 flex flex-col gap-4"
+              dir="rtl"
+            >
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <MessageCircle className="text-emerald-500" />
+                  خيارات الإرسال
+                </h3>
+                <button
+                  onClick={() => setIsWaOptionsOpen(false)}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full transition cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => handleCommunication("wa", "last")}
+                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
+                >
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">1</div>
+                  إرسال آخر عملية جديدة
+                </button>
+                <button
+                  onClick={() => handleCommunication("wa", "recent")}
+                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
+                >
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">5</div>
+                  إرسال آخر 5 عمليات
+                </button>
+                <button
+                  onClick={() => handleCommunication("wa", "all")}
+                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
+                >
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                    <FileText size={18} />
+                  </div>
+                  إرسال كامل الكشف
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
