@@ -38,6 +38,7 @@ export interface Person {
   fieldsCount?: string;  // Well/Qat fields
   wellId?: string;       // ID of the specific well
   lastTransactionAt?: Timestamp; // For cached person lists
+  lastStatementSentAt?: Timestamp | null; // Track when the last statement was sent
 }
 
 export type TransactionType =

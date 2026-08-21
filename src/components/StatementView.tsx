@@ -66,8 +66,8 @@ export default function StatementView({ currentUser, personId, personName, perso
   const [isWellOpOpen, setIsWellOpOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // WhatsApp Share Modal
-  const [isWaOptionsOpen, setIsWaOptionsOpen] = useState(false);
+  // Share Modal (WhatsApp / SMS)
+  const [activeShareMethod, setActiveShareMethod] = useState<"wa" | "sms" | null>(null);
 
   // Edit Person Form
   const [editName, setEditName] = useState("");
@@ -176,8 +176,20 @@ export default function StatementView({ currentUser, personId, personName, perso
   const colorClass = person.balance > 0 ? "text-red-500" : person.balance < 0 ? "text-emerald-600" : "text-slate-800";
   const statusLabel = person.balance > 0 ? "(عليه)" : person.balance < 0 ? "(له)" : "(مصفر)";
 
+  // Compute new transactions based on the lastStatementSentAt timestamp
+  const getNewTransactions = () => {
+    if (!person.lastStatementSentAt) {
+      // If never sent before, and we want "new", we just return the most recent one to be safe,
+      // or all. Based on request, if they select "new operations" it should just get un-sent.
+      // If it's never sent, everything is unsent. But usually that's too much, so we'll just return all.
+      return transactions;
+    }
+    const lastSentMillis = getMillis(person.lastStatementSentAt);
+    return transactions.filter(t => getMillis(t.createdAt) > lastSentMillis);
+  };
+
   // Standard platform communication intents
-  const handleCommunication = (method: "wa" | "sms" | "call", waSendType: "all" | "last" | "recent" = "all") => {
+  const handleCommunication = (method: "wa" | "sms" | "call", waSendType: "all" | "new" = "all") => {
     if (!person.phone) {
       alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل خاصية المراسلة.");
       return;
@@ -197,53 +209,84 @@ export default function StatementView({ currentUser, personId, personName, perso
 
     // Determine the title based on gender and section
     let personLabel = "السيد/ة";
+    let personNamePrefix = "أستاذ/ة";
     if (section === "qat_fields") {
       personLabel = "المشروع";
+      personNamePrefix = "المشروع";
     } else if (person.gender === "male") {
       personLabel = "السيد";
+      personNamePrefix = "أستاذ";
     } else if (person.gender === "female") {
       personLabel = "السيدة";
+      personNamePrefix = "أستاذة";
     }
  
     let message = "";
-    if (method === "wa") {
-      message = `تطبيق الدفتر الآمن\n`;
-      message += `📋 كشف حساب\n\n`;
-      message += `${personLabel} ${person.name}\n`;
-      message += `💰 الرصيد الحالي: ${absBal.toLocaleString('en-US')} ر.ي${person.balance === 0 ? "" : person.balance > 0 ? " (عليه)" : " (له)"}\n\n`;
+    if (method === "wa" || method === "sms") {
+      let transToSend = waSendType === "new" ? getNewTransactions() : transactions;
 
-      if (transactions.length === 0) {
-        message += `لا توجد عمليات مقيدة.\n`;
+      // Ensure transToSend is sorted ascending to calculate previous balance correctly (if multiple)
+      // transactions state is descending (newest first).
+      // We will sort transToSend chronologically (oldest first) to show the flow.
+      transToSend = [...transToSend].sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
+
+      if (transToSend.length === 0 && waSendType === "new") {
+        alert("لا توجد أي عمليات جديدة لإرسالها.");
+        return;
+      }
+
+      if (waSendType === "new" && transToSend.length === 1) {
+        // EXACT FORMAT FOR 1 NEW TRANSACTION
+        const t = transToSend[0];
+        const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
+
+        // Previous balance = current balance - this transaction
+        // if this was a debit (+ to balance), previous was balance - amount.
+        // if this was a credit (- to balance), previous was balance + amount.
+        const prevBalance = person.balance - (isDebit ? t.amount : -t.amount);
+        const prevBalWord = prevBalance > 0 ? "عليكم" : prevBalance < 0 ? "لكم" : "";
+        const prevBalStr = prevBalance === 0 ? "0 ر.ي" : `${Math.abs(prevBalance).toLocaleString('en-US')} ر.ي ${prevBalWord}`;
+
+        const currentBalWord = person.balance > 0 ? "عليكم" : person.balance < 0 ? "لكم" : "";
+        const currentBalStr = person.balance === 0 ? "0 ر.ي" : `${Math.abs(person.balance).toLocaleString('en-US')} ر.ي ${currentBalWord}`;
+
+        const addedWord = isDebit ? "عليكم" : "لكم";
+
+        message = `مرحباً ${personNamePrefix} ${person.name}،\n\n`;
+        message += `تم تحديث حسابكم في الدفتر الآمن:\n\n`;
+        message += `• الرصيد السابق: ${prevBalStr}\n`;
+        message += `• تم إضافة: ${t.amount.toLocaleString('en-US')} ر.ي ${addedWord}\n`;
+        message += `• البيان: ${t.note || "بدون بيان"}\n`;
+        message += `• الرصيد الحالي: ${currentBalStr}\n\n`;
+        message += `شكراً لتعاملكم معنا.`;
       } else {
-        const typesMap: any = {
+        // MULTIPLE NEW OR ALL TRANSACTIONS
+        const titleLine = waSendType === "new" ? `تم إضافة ${transToSend.length} عمليات جديدة في حسابكم:` : `سجل العمليات:`;
+
+        message = `مرحباً ${personNamePrefix} ${person.name}،\n\n`;
+        message += `${titleLine}\n\n`;
+
+        const typesMap: Record<string, string> = {
           debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
           deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
           well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
         };
 
-        let transToSend = transactions;
-        if (waSendType === "last") {
-          message += `آخر عملية:\n`;
-          transToSend = transactions.slice(0, 1);
-        } else if (waSendType === "recent") {
-          message += `العمليات الأخيرة:\n`;
-          transToSend = transactions.slice(0, 5); // arbitrarily sending last 5 for recent
-        } else {
-           message += `سجل العمليات:\n`;
-           // Send all
-        }
-
         transToSend.forEach((t) => {
           const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
           const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
           message += `🔹 ${typesMap[t.type] || "عملية"} — ${t.note || "بدون بيان"}\n`;
-          message += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
+          message += `💰 ${t.amount.toLocaleString('en-US')} ر.ي (${isDebit ? "عليكم" : "لكم"})\n`;
           message += `📅 ${date}\n\n`;
         });
+
+        const currentBalWord = person.balance > 0 ? "عليكم" : person.balance < 0 ? "لكم" : "";
+        const currentBalStr = person.balance === 0 ? "0 ر.ي" : `${Math.abs(person.balance).toLocaleString('en-US')} ر.ي ${currentBalWord}`;
+
+        message += `------------------------\n`;
+        message += `الرصيد الإجمالي الحالي: ${currentBalStr}\n\n`;
+        message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
       }
-      message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
-    } else {
-      message = `مرحباً ${person.name}،\nنفيدكم بأن رصيد حسابكم الحالي لدينا في نظام الدفتر الآمن هو: ${balanceTextStr}`;
     }
 
     const encoded = encodeURIComponent(message);
@@ -256,8 +299,20 @@ export default function StatementView({ currentUser, personId, personName, perso
       window.open(`tel:+${phoneClean}`, "_blank");
     }
 
+    // Update lastStatementSentAt in Firestore if sending new transactions
+    if (waSendType === "new" && method !== "call") {
+      let transToSend = getNewTransactions();
+      if (transToSend.length > 0) {
+        // transToSend is descending (from getNewTransactions/transactions state), so index 0 is newest
+        const newestTrans = transToSend[0];
+        updateDoc(doc(db, "persons", personId), {
+          lastStatementSentAt: newestTrans.createdAt
+        }).catch(err => console.error("Failed to update lastStatementSentAt", err));
+      }
+    }
+
     // Close the options modal if it was open
-    setIsWaOptionsOpen(false);
+    setActiveShareMethod(null);
   };
 
   const userProfileName = () => {
@@ -766,7 +821,7 @@ export default function StatementView({ currentUser, personId, personName, perso
           {person.phone && (
             <>
               <button
-                onClick={() => setIsWaOptionsOpen(true)}
+                onClick={() => setActiveShareMethod("wa")}
                 className="flex-1 py-3 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-emerald-500/10 cursor-pointer"
                 title="مراسلة واتس اب"
               >
@@ -775,7 +830,7 @@ export default function StatementView({ currentUser, personId, personName, perso
               </button>
 
               <button
-                onClick={() => handleCommunication("sms")}
+                onClick={() => setActiveShareMethod("sms")}
                 className="flex-1 py-3 px-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-amber-500/10 cursor-pointer"
                 title="إرسال رسالة نصية SMS"
               >
@@ -1314,10 +1369,10 @@ export default function StatementView({ currentUser, personId, personName, perso
             </motion.div>
           </div>
         )}
-        {/* WhatsApp Send Options Modal */}
-        {isWaOptionsOpen && (
+        {/* Share Options Modal */}
+        {activeShareMethod && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsWaOptionsOpen(false)}></div>
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setActiveShareMethod(null)}></div>
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1331,7 +1386,7 @@ export default function StatementView({ currentUser, personId, personName, perso
                   خيارات الإرسال
                 </h3>
                 <button
-                  onClick={() => setIsWaOptionsOpen(false)}
+                  onClick={() => setActiveShareMethod(null)}
                   className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full transition cursor-pointer"
                 >
                   <X size={20} />
@@ -1340,21 +1395,14 @@ export default function StatementView({ currentUser, personId, personName, perso
 
               <div className="flex flex-col gap-3">
                 <button
-                  onClick={() => handleCommunication("wa", "last")}
+                  onClick={() => handleCommunication(activeShareMethod, "new")}
                   className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
                 >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">1</div>
-                  إرسال آخر عملية جديدة
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">N</div>
+                  إرسال العمليات الجديدة
                 </button>
                 <button
-                  onClick={() => handleCommunication("wa", "recent")}
-                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
-                >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">5</div>
-                  إرسال آخر 5 عمليات
-                </button>
-                <button
-                  onClick={() => handleCommunication("wa", "all")}
+                  onClick={() => handleCommunication(activeShareMethod, "all")}
                   className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
                 >
                   <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
