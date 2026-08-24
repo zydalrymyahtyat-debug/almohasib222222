@@ -322,14 +322,18 @@ export default function App() {
              if (navigator.onLine) {
                 // Submit a device request BEFORE signing out
                 try {
-                   await addDoc(collection(db, "deviceRequests"), {
-                     userId: currentUser.uid,
-                     email: currentUser.email || "",
-                     name: data.name || "مستخدم",
-                     deviceId: uuid,
-                     status: "pending",
-                     timestamp: serverTimestamp()
-                   });
+                   const reqsQ = query(collection(db, "deviceRequests"), where("userId", "==", currentUser.uid), where("deviceId", "==", uuid), where("status", "==", "pending"));
+                   const reqsSnap = await getDocs(reqsQ);
+                   if (reqsSnap.empty) {
+                     await addDoc(collection(db, "deviceRequests"), {
+                       userId: currentUser.uid,
+                       email: currentUser.email || "",
+                       name: data.name || "مستخدم",
+                       deviceId: uuid,
+                       status: "pending",
+                       timestamp: serverTimestamp()
+                     });
+                   }
                 } catch(reqErr) {
                    console.error("Failed to submit background device request", reqErr);
                 }
