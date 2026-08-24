@@ -37,6 +37,7 @@ import InventoryDashboard from "./components/InventoryDashboard";
 import CashBanksDashboard from "./components/CashBanksDashboard";
 import ReportsDashboard from "./components/ReportsDashboard";
 import CalculatorModal from "./components/CalculatorModal";
+import MessageTemplatesView from "./components/MessageTemplatesView";
 import { Calculator } from "lucide-react";
 
 export default function App() {
@@ -842,6 +843,10 @@ export default function App() {
 
         {currentView === "reports_dashboard" && (
           <ReportsDashboard currentUser={currentUser} onGoBack={handleGoBack} userProfile={userProfile} onNavigate={handleNavigate} />
+        )}
+
+        {currentView === "templates" && (
+          <MessageTemplatesView currentUser={currentUser} onGoBack={handleGoBack} />
         )}
 
         {/* Artesian Well Sub-Dashboard View */}

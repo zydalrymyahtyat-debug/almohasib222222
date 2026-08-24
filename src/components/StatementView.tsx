@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { Person, Transaction, TransactionType, UserProfile } from "../types";
+import { Person, Transaction, TransactionType, UserProfile, MessageTemplate, TemplateType } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   ArrowLeft, Settings, MessageSquare, Phone, MessageCircle, FileText,
@@ -58,6 +58,7 @@ const getMillis = (val: any): number => {
 export default function StatementView({ currentUser, personId, personName, personPhone, initialBalance, section, userProfile, onGoBack }: StatementViewProps) {
   const [person, setPerson] = useState<Person | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals state
@@ -157,9 +158,18 @@ export default function StatementView({ currentUser, personId, personName, perso
       }
     });
 
+    // 3. Subscribe to templates
+    const templatesQ = query(collection(db, "message_templates"), where("userId", "==", currentUser.uid));
+    const templatesUnsub = onSnapshot(templatesQ, (snapshot) => {
+      const list: MessageTemplate[] = [];
+      snapshot.forEach(d => list.push({ id: d.id, ...d.data() } as MessageTemplate));
+      setTemplates(list);
+    });
+
     return () => {
       personUnsub();
       transUnsub();
+      templatesUnsub();
     };
   }, [personId, currentUser]);
 
@@ -231,12 +241,30 @@ export default function StatementView({ currentUser, personId, personName, perso
     const currentBalStr = person.balance === 0 ? "0 ر.ي" : `${Math.abs(person.balance).toLocaleString('en-US')} ر.ي ${currentBalWord}`;
 
     const addedWord = isDebit ? "عليك" : "لك";
-
     const prefix = getPersonPrefix();
-    let message = `مرحباً ${prefix} ${person.name}،\n`;
-    message += `تم تحديث حسابكم في الدفتر الآمن.\n`;
-    message += `تم إضافة ${t.amount.toLocaleString('en-US')} ر.ي ${addedWord} — البيان: ${t.note || "بدون بيان"}.\n`;
-    message += `الرصيد الحالي: ${currentBalStr}`;
+
+    // Find active SMS template
+    let message = "";
+    const activeSmsTemplate = templates.find(t => t.type === "sms_single" && t.isActive && t.isDefault) || templates.find(t => t.type === "sms_single" && t.isActive);
+
+    if (activeSmsTemplate) {
+      message = activeSmsTemplate.content
+        .replace(/{الاسم}/g, person.name)
+        .replace(/{اللقب}/g, prefix)
+        .replace(/{الرصيد_السابق}/g, prevBalStr)
+        .replace(/{المبلغ_المضاف}/g, t.amount.toLocaleString('en-US'))
+        .replace(/{اتجاه_الاضافة}/g, addedWord)
+        .replace(/{بيان_العملية}/g, t.note || "بدون بيان")
+        .replace(/{الرصيد_الحالي}/g, Math.abs(person.balance).toLocaleString('en-US'))
+        .replace(/{اتجاه_الرصيد}/g, currentBalWord)
+        .replace(/{التاريخ}/g, new Date().toLocaleDateString('ar-EG'))
+        .replace(/{عدد_العمليات}/g, "1");
+    } else {
+      message = `مرحباً ${prefix} ${person.name}،\n`;
+      message += `تم تحديث حسابكم في الدفتر الآمن.\n`;
+      message += `تم إضافة ${t.amount.toLocaleString('en-US')} ر.ي ${addedWord} — البيان: ${t.note || "بدون بيان"}.\n`;
+      message += `الرصيد الحالي: ${currentBalStr}`;
+    }
 
     const encoded = encodeURIComponent(message);
     localStorage.setItem("ignore_app_lock", "true");
@@ -269,38 +297,73 @@ export default function StatementView({ currentUser, personId, personName, perso
     // Sort chronologically for display
     transToSend = [...transToSend].sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
 
-    let personLabel = "السيد/ة";
-    if (section === "qat_fields") {
-      personLabel = "المشروع";
-    } else if (person.gender === "male") {
-      personLabel = "السيد";
-    } else if (person.gender === "female") {
-      personLabel = "السيدة";
-    }
+    const prefix = getPersonPrefix();
+    let message = "";
 
-    let message = `تطبيق الدفتر الآمن\n`;
-    message += `📋 كشف حساب\n\n`;
-    message += `${personLabel} ${person.name}\n`;
-    message += `💰 الرصيد الحالي: ${Math.abs(person.balance).toLocaleString('en-US')} ر.ي${person.balance === 0 ? "" : person.balance > 0 ? " (عليه)" : " (له)"}\n\n`;
+    // Variables calculation
+    const currentBalWord = person.balance > 0 ? "عليك" : person.balance < 0 ? "لك" : "";
+    const currentBalStr = person.balance === 0 ? "0" : Math.abs(person.balance).toLocaleString('en-US');
+
+    // Determine the template type to use
+    let templateTypeStr: TemplateType = "wa_all";
+    if (waSendType === "last" || (waSendType === "new" && transToSend.length === 1)) templateTypeStr = "wa_single";
+    else if (waSendType === "new" || waSendType === "recent") templateTypeStr = "wa_multiple";
+
+    const activeTemplate = templates.find(t => t.type === templateTypeStr && t.isActive && t.isDefault) || templates.find(t => t.type === templateTypeStr && t.isActive);
 
     if (transToSend.length === 0) {
-      message += `لا توجد عمليات مقيدة.\n`;
-    } else {
+      message = `لا توجد عمليات مقيدة.`;
+    } else if (activeTemplate) {
+      // Build transactions list string
       const typesMap: Record<string, string> = {
         debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
         deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
         well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
       };
 
-      if (waSendType === "last") {
-        message += `آخر عملية:\n`;
-      } else if (waSendType === "recent") {
-        message += `العمليات الأخيرة:\n`;
-      } else if (waSendType === "new") {
-        message += `العمليات الجديدة المضافة:\n`;
-      } else {
-        message += `سجل العمليات:\n`;
-      }
+      let transactionsListStr = "";
+      transToSend.forEach(t => {
+        const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
+        const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
+        transactionsListStr += `🔹 ${typesMap[t.type] || "عملية"} — ${t.note || "بدون بيان"}\n`;
+        transactionsListStr += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
+        transactionsListStr += `📅 ${date}\n\n`;
+      });
+
+      // Compute variables for singular (if applicable)
+      const tSingle = transToSend[0];
+      const isDebitSingle = tSingle ? ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(tSingle.type) : false;
+      const prevBalanceSingle = person.balance - (isDebitSingle ? (tSingle?.amount || 0) : -(tSingle?.amount || 0));
+      const prevBalWordSingle = prevBalanceSingle > 0 ? "عليك" : prevBalanceSingle < 0 ? "لك" : "";
+      const prevBalStrSingle = prevBalanceSingle === 0 ? "0 ر.ي" : `${Math.abs(prevBalanceSingle).toLocaleString('en-US')} ر.ي ${prevBalWordSingle}`;
+      const addedWordSingle = isDebitSingle ? "عليك" : "لك";
+
+      message = activeTemplate.content
+        .replace(/{الاسم}/g, person.name)
+        .replace(/{اللقب}/g, prefix)
+        .replace(/{الرصيد_السابق}/g, prevBalStrSingle)
+        .replace(/{المبلغ_المضاف}/g, tSingle ? tSingle.amount.toLocaleString('en-US') : "0")
+        .replace(/{اتجاه_الاضافة}/g, addedWordSingle)
+        .replace(/{بيان_العملية}/g, tSingle?.note || "بدون بيان")
+        .replace(/{الرصيد_الحالي}/g, currentBalStr)
+        .replace(/{اتجاه_الرصيد}/g, currentBalWord)
+        .replace(/{التاريخ}/g, new Date().toLocaleDateString('ar-EG'))
+        .replace(/{العمليات_المتعددة}/g, transactionsListStr)
+        .replace(/{عدد_العمليات}/g, transToSend.length.toString());
+
+    } else {
+      // Fallback
+      message = `تطبيق الدفتر الآمن\n📋 كشف حساب\n\n${prefix} ${person.name}\n💰 الرصيد الحالي: ${currentBalStr} ر.ي ${currentBalWord}\n\n`;
+      const typesMap: Record<string, string> = {
+        debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
+        deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
+        well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
+      };
+
+      if (waSendType === "last") message += `آخر عملية:\n`;
+      else if (waSendType === "recent") message += `العمليات الأخيرة:\n`;
+      else if (waSendType === "new") message += `العمليات الجديدة المضافة:\n`;
+      else message += `سجل العمليات:\n`;
 
       transToSend.forEach((t) => {
         const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
@@ -309,8 +372,8 @@ export default function StatementView({ currentUser, personId, personName, perso
         message += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
         message += `📅 ${date}\n\n`;
       });
+      message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
     }
-    message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
 
     const encoded = encodeURIComponent(message);
     localStorage.setItem("ignore_app_lock", "true");

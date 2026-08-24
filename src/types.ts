@@ -116,3 +116,17 @@ export interface CashTransaction {
   createdAt: Timestamp;
   date?: Timestamp;
 }
+
+export type TemplateType = "sms_single" | "wa_single" | "wa_multiple" | "wa_all";
+
+export interface MessageTemplate {
+  id: string;
+  userId: string;
+  type: TemplateType;
+  name: string;
+  content: string;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
