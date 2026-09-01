@@ -36,9 +36,7 @@ interface NavState {
 import InventoryDashboard from "./components/InventoryDashboard";
 import CashBanksDashboard from "./components/CashBanksDashboard";
 import ReportsDashboard from "./components/ReportsDashboard";
-import MarketMqawetView from "./components/MarketMqawetView";
 import CalculatorModal from "./components/CalculatorModal";
-import MessageTemplatesView from "./components/MessageTemplatesView";
 import { Calculator } from "lucide-react";
 
 export default function App() {
@@ -323,18 +321,14 @@ export default function App() {
              if (navigator.onLine) {
                 // Submit a device request BEFORE signing out
                 try {
-                   const reqsQ = query(collection(db, "deviceRequests"), where("userId", "==", currentUser.uid), where("deviceId", "==", uuid), where("status", "==", "pending"));
-                   const reqsSnap = await getDocs(reqsQ);
-                   if (reqsSnap.empty) {
-                     await addDoc(collection(db, "deviceRequests"), {
-                       userId: currentUser.uid,
-                       email: currentUser.email || "",
-                       name: data.name || "مستخدم",
-                       deviceId: uuid,
-                       status: "pending",
-                       timestamp: serverTimestamp()
-                     });
-                   }
+                   await addDoc(collection(db, "deviceRequests"), {
+                     userId: currentUser.uid,
+                     email: currentUser.email || "",
+                     name: data.name || "مستخدم",
+                     deviceId: uuid,
+                     status: "pending",
+                     timestamp: serverTimestamp()
+                   });
                 } catch(reqErr) {
                    console.error("Failed to submit background device request", reqErr);
                 }
@@ -850,10 +844,6 @@ export default function App() {
           <ReportsDashboard currentUser={currentUser} onGoBack={handleGoBack} userProfile={userProfile} onNavigate={handleNavigate} />
         )}
 
-        {currentView === "templates" && (
-          <MessageTemplatesView currentUser={currentUser} onGoBack={handleGoBack} />
-        )}
-
         {/* Artesian Well Sub-Dashboard View */}
                 {currentView === "wells_list" && (
           <WellsList
@@ -964,26 +954,8 @@ export default function App() {
                 </div>
                 <h3 className="font-black text-sm text-slate-800">تقارير مخلّصة</h3>
               </div>
-
-              <div
-                onClick={() => handleNavigate("market_mqawet", "مقوت من السوق")}
-                className="p-5 bg-white border border-slate-100 rounded-2xl flex flex-col items-center text-center cursor-pointer shadow-sm active:scale-95 transition md:col-span-2"
-              >
-                <div className="p-3 bg-amber-50 text-amber-500 rounded-xl mb-3">
-                  <Leaf size={22} />
-                </div>
-                <h3 className="font-black text-sm text-slate-800">مقوت من السوق</h3>
-              </div>
             </div>
           </div>
-        )}
-
-        {currentView === "market_mqawet" && (
-          <MarketMqawetView
-            currentUser={currentUser}
-            userProfile={userProfile}
-            onNavigate={handleNavigate}
-          />
         )}
 
         {/* Global Multi-field Search Tool View */}

@@ -31,14 +31,12 @@ export interface Person {
   phone: string;
   balance: number; // positive = عليه (debt), negative = له (credit)
   createdAt: Timestamp;
-  gender?: "male" | "female"; // Customers/Persons gender for messages
   company?: string;      // Suppliers only
   salary?: number;       // Employees only
   region?: string;       // Well/Qat fields
   fieldsCount?: string;  // Well/Qat fields
   wellId?: string;       // ID of the specific well
   lastTransactionAt?: Timestamp; // For cached person lists
-  lastStatementSentAt?: Timestamp | null; // Track when the last statement was sent
 }
 
 export type TransactionType =
@@ -64,34 +62,6 @@ export interface Transaction {
   createdAt: Timestamp;
   wellId?: string;
   date?: Timestamp;
-}
-
-export interface MarketMqawetItem {
-  personId?: string;
-  name: string;
-  phone: string;
-  qty: number;
-  price: number;
-  baseVal: number;
-  comm: number;
-  totalRequired: number;
-}
-
-export interface MarketBatch {
-  id: string;
-  userId: string;
-  date: string;
-  rawiId?: string;
-  rawiName: string;
-  rawiPhone: string;
-  rawiQty: number;
-  rawiPrice: number;
-  commRawiPct: number;
-  commMqawetPct: number;
-  taxPct: number;
-  mqawetList: MarketMqawetItem[];
-  status: "in_progress" | "completed";
-  createdAt: Timestamp;
 }
 
 export interface Expense {
@@ -143,18 +113,4 @@ export interface CashTransaction {
   destination?: string; // used for transfer
   createdAt: Timestamp;
   date?: Timestamp;
-}
-
-export type TemplateType = "sms_single" | "wa_single" | "wa_multiple" | "wa_all" | "market_rawi" | "market_mqawet";
-
-export interface MessageTemplate {
-  id: string;
-  userId: string;
-  type: TemplateType;
-  name: string;
-  content: string;
-  isDefault: boolean;
-  isActive: boolean;
-  createdAt: Timestamp;
-  updatedAt?: Timestamp;
 }

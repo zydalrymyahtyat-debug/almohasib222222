@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "2.0.1",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -11,9 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "android:sync": "npx cap sync",
-    "android:open": "npx cap open android",
-    "android:build:aab": "cd android && ./gradlew bundleRelease",
-    "android:build:apk": "cd android && ./gradlew assembleRelease"
+    "android:open": "npx cap open android"
   },
   "dependencies": {
     "@capacitor-community/contacts": "^7.2.0",

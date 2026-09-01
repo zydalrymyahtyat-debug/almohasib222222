@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { setDoc, doc, getDoc, collection, addDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore";
+import { setDoc, doc, getDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { Device } from "@capacitor/device";
 import { motion, AnimatePresence } from "motion/react";
 import { Lock, Mail, User, Phone, CheckCircle, MessageSquare } from "lucide-react";
@@ -60,18 +60,14 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           if (allowed.length > 0 && !allowed.includes(uuid)) {
             // Create a device approval request for the admin BEFORE signing out
             try {
-               const reqsQ = query(collection(db, "deviceRequests"), where("userId", "==", userCredential.user.uid), where("deviceId", "==", uuid), where("status", "==", "pending"));
-               const reqsSnap = await getDocs(reqsQ);
-               if (reqsSnap.empty) {
-                 await addDoc(collection(db, "deviceRequests"), {
-                   userId: userCredential.user.uid,
-                   email: email,
-                   name: userData.name || "مستخدم",
-                   deviceId: uuid,
-                   status: "pending",
-                   timestamp: serverTimestamp()
-                 });
-               }
+               await addDoc(collection(db, "deviceRequests"), {
+                 userId: userCredential.user.uid,
+                 email: email,
+                 name: userData.name || "مستخدم",
+                 deviceId: uuid,
+                 status: "pending",
+                 timestamp: serverTimestamp()
+               });
             } catch(e) {
                console.error("Failed to send device request", e);
             }

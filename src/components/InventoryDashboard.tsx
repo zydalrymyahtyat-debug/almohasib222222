@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Contacts } from "@capacitor-community/contacts";
 import { Capacitor } from "@capacitor/core";
 import { ArrowRight, Printer, Share2, Receipt, Phone, Package, AlertTriangle, Barcode, ClipboardList, TrendingUp, Search, Plus, X, Save, ScanLine, Edit2, Trash2 } from "lucide-react";
-import { UserProfile, InventoryItem, InventoryMovement, Person } from "../types";
+import { UserProfile, InventoryItem, InventoryMovement } from "../types";
 import { auth, db } from "../firebase";
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import BarcodeScannerModal from "./BarcodeScannerModal";
@@ -24,9 +24,6 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
   const [invoicesSearch, setInvoicesSearch] = useState("");
   const [movementsSearch, setMovementsSearch] = useState("");
   const [showInvoiceModal, setShowInvoiceModal] = useState<any>(null);
-
-  const [customers, setCustomers] = useState<Person[]>([]);
-  const [posSelectedCustomerId, setPosSelectedCustomerId] = useState<string>("cash"); // "cash" | person.id
   const [items, setItems] = useState<InventoryItem[]>(() => {
     const cached = localStorage.getItem("cached_inventory_items");
     if (cached) {
@@ -146,22 +143,11 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
       if (isMounted) setInvoices(invs);
     });
 
-    // Fetch registered persons (customers, suppliers, well_customers, etc)
-    const personsQ = query(collection(db, "persons"), where("userId", "==", currentUser.uid));
-    const unsubPersons = onSnapshot(personsQ, (snap) => {
-      const ps: Person[] = [];
-      snap.forEach(doc => ps.push({ id: doc.id, ...doc.data() } as Person));
-      // Optionally sort alphabetically
-      ps.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-      if (isMounted) setCustomers(ps);
-    });
-
     return () => {
       isMounted = false;
       unsubItems();
       unsubMoves();
       unsubInvoices();
-      unsubPersons();
     };
   }, []);
 
@@ -357,12 +343,7 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
       </div>
 
       <div className="space-y-3">
-        {filteredItems.map(item => {
-          const totalSold = movements
-            .filter(m => m.itemId === item.id && m.type === "out")
-            .reduce((sum, m) => sum + m.quantity, 0);
-
-          return (
+        {filteredItems.map(item => (
           <div key={item.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${item.quantity <= item.minQuantity ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-500'}`}>
@@ -374,11 +355,7 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
               </div>
             </div>
             <div className="text-left flex items-center gap-4">
-              <div className="text-center ml-2 border-l border-slate-100 pl-4">
-                <span className="text-base font-black font-mono block text-emerald-600">{totalSold}</span>
-                <span className="text-xs text-slate-400 font-bold block">تم بيعه</span>
-              </div>
-              <div className="text-center">
+              <div>
                 <span className={`text-base font-black font-mono block ${item.quantity <= item.minQuantity ? 'text-rose-500' : 'text-slate-800'}`}>{item.quantity}</span>
                 <span className="text-xs text-slate-400 font-bold block">متوفر</span>
               </div>
@@ -396,7 +373,7 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
               </div>
             </div>
           </div>
-        )})}
+        ))}
         {filteredItems.length === 0 && (
           <div className="text-center py-10">
             <p className="text-sm font-bold text-slate-400">لا توجد أصناف في المخزون حالياً.</p>
@@ -592,36 +569,11 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
           quantity: cartItem.item.quantity - cartItem.quantity
         });
       }
-
-      // Link to Customer Ledger if a registered customer is selected
-      if (posSelectedCustomerId !== "cash") {
-        const customer = customers.find(c => c.id === posSelectedCustomerId);
-        if (customer) {
-          // Add transaction to statement
-          const itemsList = posCart.map(c => `${c.quantity}x ${c.item.name}`).join('، ');
-          await addDoc(collection(db, "transactions"), {
-            userId: currentUser.uid,
-            personId: customer.id,
-            type: "debt", // عليه
-            amount: totalAmount,
-            note: `فاتورة مبيعات #${invoiceNumber} (${itemsList})`,
-            section: customer.type || "customers",
-            createdAt: serverTimestamp()
-          });
-
-          // Update customer balance
-          await updateDoc(doc(db, "persons", customer.id), {
-            balance: (customer.balance || 0) + totalAmount,
-            lastTransactionAt: serverTimestamp()
-          });
-        }
-      }
       
       setPosCart([]);
       setPosSearchQuery("");
       setPosCustomerName("");
       setPosCustomerPhone("");
-      setPosSelectedCustomerId("cash");
       
       // Show invoice modal
       setShowInvoiceModal({ id: invoiceRef.id, ...invoiceData, createdAt: { toDate: () => new Date() } });
@@ -850,59 +802,28 @@ export default function InventoryDashboard({ currentUser, onGoBack, userProfile,
               
               <div className="mt-6 pt-4 border-t border-slate-100">
                 <div className="mb-4 space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5">العميل / الحساب</label>
-                    <select
-                      value={posSelectedCustomerId}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPosSelectedCustomerId(val);
-                        if (val === "cash") {
-                          setPosCustomerName("");
-                          setPosCustomerPhone("");
-                        } else {
-                          const customer = customers.find(c => c.id === val);
-                          if (customer) {
-                            setPosCustomerName(customer.name);
-                            setPosCustomerPhone(customer.phone || "");
-                          }
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-emerald-500 appearance-none"
-                    >
-                      <option value="cash">عميل نقدي (بدون حساب)</option>
-                      {customers.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="اسم العميل (اختياري)"
+                      value={posCustomerName}
+                      onChange={(e) => setPosCustomerName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500"
+                    />
                   </div>
-
-                  {posSelectedCustomerId === "cash" && (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="اسم العميل النقدي (اختياري)"
-                          value={posCustomerName}
-                          onChange={(e) => setPosCustomerName(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="tel"
-                          placeholder="رقم الهاتف (اختياري)"
-                          value={posCustomerPhone}
-                          onChange={(e) => setPosCustomerPhone(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500"
-                          dir="ltr"
-                        />
-                        <button type="button" onClick={handlePickContact} className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition">
-                          <Phone size={18} />
-                        </button>
-                      </div>
-                    </>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      placeholder="رقم الهاتف (اختياري)"
+                      value={posCustomerPhone}
+                      onChange={(e) => setPosCustomerPhone(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500"
+                      dir="ltr"
+                    />
+                    <button type="button" onClick={handlePickContact} className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition">
+                      <Phone size={18} />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex justify-between items-center mb-4">
                   <span className="font-bold text-slate-500">الإجمالي:</span>

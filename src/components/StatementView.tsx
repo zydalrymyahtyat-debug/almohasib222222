@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { Person, Transaction, TransactionType, UserProfile, MessageTemplate, TemplateType } from "../types";
+import { Person, Transaction, TransactionType, UserProfile } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   ArrowLeft, Settings, MessageSquare, Phone, MessageCircle, FileText,
@@ -58,7 +58,6 @@ const getMillis = (val: any): number => {
 export default function StatementView({ currentUser, personId, personName, personPhone, initialBalance, section, userProfile, onGoBack }: StatementViewProps) {
   const [person, setPerson] = useState<Person | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals state
@@ -66,9 +65,6 @@ export default function StatementView({ currentUser, personId, personName, perso
   const [isTransOpen, setIsTransOpen] = useState(false);
   const [isWellOpOpen, setIsWellOpOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  // WhatsApp Share Modal
-  const [isWaOptionsOpen, setIsWaOptionsOpen] = useState(false);
 
   // Edit Person Form
   const [editName, setEditName] = useState("");
@@ -158,18 +154,9 @@ export default function StatementView({ currentUser, personId, personName, perso
       }
     });
 
-    // 3. Subscribe to templates
-    const templatesQ = query(collection(db, "message_templates"), where("userId", "==", currentUser.uid));
-    const templatesUnsub = onSnapshot(templatesQ, (snapshot) => {
-      const list: MessageTemplate[] = [];
-      snapshot.forEach(d => list.push({ id: d.id, ...d.data() } as MessageTemplate));
-      setTemplates(list);
-    });
-
     return () => {
       personUnsub();
       transUnsub();
-      templatesUnsub();
     };
   }, [personId, currentUser]);
 
@@ -186,20 +173,13 @@ export default function StatementView({ currentUser, personId, personName, perso
   const colorClass = person.balance > 0 ? "text-red-500" : person.balance < 0 ? "text-emerald-600" : "text-slate-800";
   const statusLabel = person.balance > 0 ? "(عليه)" : person.balance < 0 ? "(له)" : "(مصفر)";
 
-  // Compute new transactions based on the lastStatementSentAt timestamp
-  const getNewTransactions = () => {
-    if (!person.lastStatementSentAt) {
-      // If never sent before, and we want "new", we just return the most recent one to be safe,
-      // or all. Based on request, if they select "new operations" it should just get un-sent.
-      // If it's never sent, everything is unsent. But usually that's too much, so we'll just return all.
-      return transactions;
+  // Standard platform communication intents
+  const handleCommunication = (method: "wa" | "sms" | "call") => {
+    if (!person.phone) {
+      alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل خاصية المراسلة.");
+      return;
     }
-    const lastSentMillis = getMillis(person.lastStatementSentAt);
-    return transactions.filter(t => getMillis(t.createdAt) > lastSentMillis);
-  };
 
-  const getCleanPhone = () => {
-    if (!person.phone) return null;
     let phoneClean = person.phone.trim().replace(/[\s-()]/g, "");
     if (phoneClean.startsWith("+")) phoneClean = phoneClean.substring(1);
     if (phoneClean.startsWith("00")) phoneClean = phoneClean.substring(2);
@@ -207,199 +187,51 @@ export default function StatementView({ currentUser, personId, personName, perso
     if (!phoneClean.startsWith("967") && phoneClean.length > 0) {
       phoneClean = "967" + phoneClean;
     }
-    return phoneClean;
-  };
 
-  const getPersonPrefix = () => {
-    if (section === "qat_fields") return "المشروع";
-    if (person.gender === "male") return "السيد";
-    if (person.gender === "female") return "السيدة";
-    return "السيد/ة";
-  };
+    const userName = userProfileName();
+    const balanceWord = person.balance > 0 ? "عليك" : person.balance < 0 ? "لك" : "مصفر";
+    const balanceTextStr = person.balance > 0 ? `عليك ${absBal.toLocaleString('en-US')} ر.ي` : person.balance < 0 ? `لك ${absBal.toLocaleString('en-US')} ر.ي` : "الحساب مصفر";
+    const personLabel = section === "qat_fields" ? "المشروع" : "السيد/ة";
 
-  // Dedicated SMS sender: highly brief
-  const handleSMS = () => {
-    const phoneClean = getCleanPhone();
-    if (!phoneClean) {
-      alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل خاصية المراسلة.");
-      return;
-    }
-
-    if (transactions.length === 0) {
-      alert("لا توجد عمليات مقيدة.");
-      return;
-    }
-
-    const t = transactions[0]; // The newest transaction (transactions array is sorted desc)
-    const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
-
-    const prevBalance = person.balance - (isDebit ? t.amount : -t.amount);
-    const prevBalWord = prevBalance > 0 ? "عليك" : prevBalance < 0 ? "لك" : "";
-    const prevBalStr = prevBalance === 0 ? "0 ر.ي" : `${Math.abs(prevBalance).toLocaleString('en-US')} ر.ي ${prevBalWord}`;
-
-    const currentBalWord = person.balance > 0 ? "عليك" : person.balance < 0 ? "لك" : "";
-    const currentBalStr = person.balance === 0 ? "0 ر.ي" : `${Math.abs(person.balance).toLocaleString('en-US')} ر.ي ${currentBalWord}`;
-
-    const addedWord = isDebit ? "عليك" : "لك";
-    const prefix = getPersonPrefix();
-
-    // Find active SMS template
     let message = "";
-    const activeSmsTemplate = templates.find(t => t.type === "sms_single" && t.isActive && t.isDefault) || templates.find(t => t.type === "sms_single" && t.isActive);
+    if (method === "wa") {
+      message = `*تطبيق الدفتر الآمن - كشف حساب*\n`;
+      message += `إصدار: *${userName}*\n`;
+      message += `التاريخ: ${new Date().toLocaleDateString("ar-EG")}\n\n`;
+      message += `*${personLabel}:* ${person.name}\n`;
+      message += `*الرصيد الإجمالي:* ${absBal.toLocaleString('en-US')} ر.ي (${balanceWord})\n\n`;
+      message += `*--- سجل العمليات المؤخرة ---*\n`;
 
-    if (activeSmsTemplate) {
-      message = activeSmsTemplate.content
-        .replace(/{الاسم}/g, person.name)
-        .replace(/{اللقب}/g, prefix)
-        .replace(/{الرصيد_السابق}/g, prevBalStr)
-        .replace(/{المبلغ_المضاف}/g, t.amount.toLocaleString('en-US'))
-        .replace(/{اتجاه_الاضافة}/g, addedWord)
-        .replace(/{بيان_العملية}/g, t.note || "بدون بيان")
-        .replace(/{الرصيد_الحالي}/g, Math.abs(person.balance).toLocaleString('en-US'))
-        .replace(/{اتجاه_الرصيد}/g, currentBalWord)
-        .replace(/{التاريخ}/g, new Date().toLocaleDateString('ar-EG'))
-        .replace(/{عدد_العمليات}/g, "1");
-    } else {
-      message = `مرحباً ${prefix} ${person.name}،\n`;
-      message += `تم تحديث حسابكم في الدفتر الآمن.\n`;
-      message += `تم إضافة ${t.amount.toLocaleString('en-US')} ر.ي ${addedWord} — البيان: ${t.note || "بدون بيان"}.\n`;
-      message += `الرصيد الحالي: ${currentBalStr}`;
-    }
-
-    const encoded = encodeURIComponent(message);
-    localStorage.setItem("ignore_app_lock", "true");
-    window.open(`sms:${phoneClean}?body=${encoded}`, "_blank");
-  };
-
-  // Dedicated WhatsApp sender: detailed format
-  const handleWhatsApp = (waSendType: "all" | "new" | "last" | "recent") => {
-    const phoneClean = getCleanPhone();
-    if (!phoneClean) {
-      alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل خاصية المراسلة.");
-      return;
-    }
-
-    let transToSend = transactions;
-
-    if (waSendType === "new") {
-      transToSend = getNewTransactions();
-    } else if (waSendType === "last") {
-      transToSend = transactions.slice(0, 1);
-    } else if (waSendType === "recent") {
-      transToSend = transactions.slice(0, 5);
-    } // "all" uses full transactions array
-
-    if (transToSend.length === 0 && waSendType === "new") {
-      alert("لا توجد أي عمليات جديدة لإرسالها.");
-      return;
-    }
-
-    // Sort chronologically for display
-    transToSend = [...transToSend].sort((a, b) => getMillis(a.createdAt) - getMillis(b.createdAt));
-
-    const prefix = getPersonPrefix();
-    let message = "";
-
-    // Variables calculation
-    const currentBalWord = person.balance > 0 ? "عليك" : person.balance < 0 ? "لك" : "";
-    const currentBalStr = person.balance === 0 ? "0" : Math.abs(person.balance).toLocaleString('en-US');
-
-    // Determine the template type to use
-    let templateTypeStr: TemplateType = "wa_all";
-    if (waSendType === "last" || (waSendType === "new" && transToSend.length === 1)) templateTypeStr = "wa_single";
-    else if (waSendType === "new" || waSendType === "recent") templateTypeStr = "wa_multiple";
-
-    const activeTemplate = templates.find(t => t.type === templateTypeStr && t.isActive && t.isDefault) || templates.find(t => t.type === templateTypeStr && t.isActive);
-
-    if (transToSend.length === 0) {
-      message = `لا توجد عمليات مقيدة.`;
-    } else if (activeTemplate) {
-      // Build transactions list string
-      const typesMap: Record<string, string> = {
-        debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
-        deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
-        well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
-      };
-
-      let transactionsListStr = "";
-      transToSend.forEach(t => {
-        const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
-        const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
-        transactionsListStr += `🔹 ${typesMap[t.type] || "عملية"} — ${t.note || "بدون بيان"}\n`;
-        transactionsListStr += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
-        transactionsListStr += `📅 ${date}\n\n`;
-      });
-
-      // Compute variables for singular (if applicable)
-      const tSingle = transToSend[0];
-      const isDebitSingle = tSingle ? ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(tSingle.type) : false;
-      const prevBalanceSingle = person.balance - (isDebitSingle ? (tSingle?.amount || 0) : -(tSingle?.amount || 0));
-      const prevBalWordSingle = prevBalanceSingle > 0 ? "عليك" : prevBalanceSingle < 0 ? "لك" : "";
-      const prevBalStrSingle = prevBalanceSingle === 0 ? "0 ر.ي" : `${Math.abs(prevBalanceSingle).toLocaleString('en-US')} ر.ي ${prevBalWordSingle}`;
-      const addedWordSingle = isDebitSingle ? "عليك" : "لك";
-
-      message = activeTemplate.content
-        .replace(/{الاسم}/g, person.name)
-        .replace(/{اللقب}/g, prefix)
-        .replace(/{الرصيد_السابق}/g, prevBalStrSingle)
-        .replace(/{المبلغ_المضاف}/g, tSingle ? tSingle.amount.toLocaleString('en-US') : "0")
-        .replace(/{اتجاه_الاضافة}/g, addedWordSingle)
-        .replace(/{بيان_العملية}/g, tSingle?.note || "بدون بيان")
-        .replace(/{الرصيد_الحالي}/g, currentBalStr)
-        .replace(/{اتجاه_الرصيد}/g, currentBalWord)
-        .replace(/{التاريخ}/g, new Date().toLocaleDateString('ar-EG'))
-        .replace(/{العمليات_المتعددة}/g, transactionsListStr)
-        .replace(/{عدد_العمليات}/g, transToSend.length.toString());
-
-    } else {
-      // Fallback
-      message = `تطبيق الدفتر الآمن\n📋 كشف حساب\n\n${prefix} ${person.name}\n💰 الرصيد الحالي: ${currentBalStr} ر.ي ${currentBalWord}\n\n`;
-      const typesMap: Record<string, string> = {
-        debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
-        deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
-        well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
-      };
-
-      if (waSendType === "last") message += `آخر عملية:\n`;
-      else if (waSendType === "recent") message += `العمليات الأخيرة:\n`;
-      else if (waSendType === "new") message += `العمليات الجديدة المضافة:\n`;
-      else message += `سجل العمليات:\n`;
-
-      transToSend.forEach((t) => {
-        const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
-        const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
-        message += `🔹 ${typesMap[t.type] || "عملية"} — ${t.note || "بدون بيان"}\n`;
-        message += `💰 ${isDebit ? "+" : "-"}${t.amount.toLocaleString('en-US')} ر.ي\n`;
-        message += `📅 ${date}\n\n`;
-      });
-      message += `نسعد بخدمتكم، وشكراً لثقتكم.`;
-    }
-
-    const encoded = encodeURIComponent(message);
-    localStorage.setItem("ignore_app_lock", "true");
-    window.open(`https://wa.me/${phoneClean}?text=${encoded}`, "_blank");
-
-    // Update lastStatementSentAt in Firestore if sending new transactions
-    if (waSendType === "new") {
-      const newestTrans = getNewTransactions()[0]; // newest is first in getNewTransactions() returning from 'transactions' (which is desc)
-      if (newestTrans) {
-        updateDoc(doc(db, "persons", personId), {
-          lastStatementSentAt: newestTrans.createdAt
-        }).catch(err => console.error("Failed to update lastStatementSentAt", err));
+      if (transactions.length === 0) {
+        message += `لا توجد عمليات مقيدة.\n`;
+      } else {
+        // Add last 5 transactions for readability on whatsapp
+        transactions.slice(0, 8).forEach((t) => {
+          const typesMap: any = {
+            debt: "عليه", credit: "له", salary: "راتب", withdrawal: "سحب",
+            deduction: "خصم", bonus: "مكافأة", well_watering: "سقاية",
+            well_payment: "تسديد", qat_expense: "خرج", qat_sale: "مبيعات"
+          };
+          const date = t.createdAt.toDate().toLocaleDateString("ar-EG");
+          const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
+          message += `🔹 *${typesMap[t.type] || "عملية"}* (${date})\n`;
+          if (t.note) message += `📝 ${t.note}\n`;
+          message += `💰 ${isDebit ? "+" : "-"} ${t.amount.toLocaleString('en-US')} ر.ي\n\n`;
+        });
       }
+    } else {
+      message = `مرحباً ${person.name}،\nنفيدكم بأن رصيد حسابكم الحالي لدينا في نظام الدفتر الآمن هو: ${balanceTextStr}`;
     }
 
-    setIsWaOptionsOpen(false);
-  };
-
-  const handleCall = () => {
-    const phoneClean = getCleanPhone();
-    if (!phoneClean) {
-      alert("الرجاء تسجيل رقم هاتف للحساب أولاً لتفعيل الاتصال.");
-      return;
+    const encoded = encodeURIComponent(message);
+    localStorage.setItem("ignore_app_lock", "true"); // Prevent locking when switching to WhatsApp/SMS/Dialer
+    if (method === "wa") {
+      window.open(`https://wa.me/${phoneClean}?text=${encoded}`, "_blank");
+    } else if (method === "sms") {
+      window.open(`sms:${phoneClean}?body=${encoded}`, "_blank");
+    } else if (method === "call") {
+      window.open(`tel:+${phoneClean}`, "_blank");
     }
-    localStorage.setItem("ignore_app_lock", "true");
-    window.open(`tel:+${phoneClean}`, "_blank");
   };
 
   const userProfileName = () => {
@@ -908,7 +740,7 @@ export default function StatementView({ currentUser, personId, personName, perso
           {person.phone && (
             <>
               <button
-                onClick={() => setIsWaOptionsOpen(true)}
+                onClick={() => handleCommunication("wa")}
                 className="flex-1 py-3 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-emerald-500/10 cursor-pointer"
                 title="مراسلة واتس اب"
               >
@@ -917,7 +749,7 @@ export default function StatementView({ currentUser, personId, personName, perso
               </button>
 
               <button
-                onClick={handleSMS}
+                onClick={() => handleCommunication("sms")}
                 className="flex-1 py-3 px-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-amber-500/10 cursor-pointer"
                 title="إرسال رسالة نصية SMS"
               >
@@ -926,7 +758,7 @@ export default function StatementView({ currentUser, personId, personName, perso
               </button>
 
               <button
-                onClick={handleCall}
+                onClick={() => handleCommunication("call")}
                 className="flex-1 py-3 px-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl flex flex-col items-center gap-1 transition shadow-md shadow-blue-500/10 cursor-pointer"
                 title="اتصال هاتفي مباشر"
               >
@@ -1453,65 +1285,6 @@ export default function StatementView({ currentUser, personId, personName, perso
                   </button>
                 </div>
               </form>
-            </motion.div>
-          </div>
-        )}
-        {/* WhatsApp Send Options Modal */}
-        {isWaOptionsOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsWaOptionsOpen(false)}></div>
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 p-6 flex flex-col gap-4"
-              dir="rtl"
-            >
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                  <MessageCircle className="text-emerald-500" />
-                  خيارات الإرسال
-                </h3>
-                <button
-                  onClick={() => setIsWaOptionsOpen(false)}
-                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full transition cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => handleWhatsApp("new")}
-                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
-                >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">N</div>
-                  إرسال العمليات الجديدة
-                </button>
-                <button
-                  onClick={() => handleWhatsApp("last")}
-                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
-                >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">1</div>
-                  إرسال آخر عملية فقط
-                </button>
-                <button
-                  onClick={() => handleWhatsApp("recent")}
-                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
-                >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">5</div>
-                  إرسال آخر 5 عمليات
-                </button>
-                <button
-                  onClick={() => handleWhatsApp("all")}
-                  className="w-full py-4 px-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-2xl cursor-pointer text-right flex items-center gap-3 transition"
-                >
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                    <FileText size={18} />
-                  </div>
-                  إرسال كامل الكشف
-                </button>
-              </div>
             </motion.div>
           </div>
         )}

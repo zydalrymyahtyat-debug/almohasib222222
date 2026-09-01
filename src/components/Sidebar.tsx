@@ -6,7 +6,7 @@ import { updateDoc, doc, getDoc, collection, query, where, onSnapshot } from "fi
 import { motion, AnimatePresence } from "motion/react";
 import { 
   X, Camera, Trash2, BookOpen, Database, RefreshCw, 
-  Fingerprint, LogOut, CheckCircle, Bell, Info, Edit2, MessageSquare
+  Fingerprint, LogOut, CheckCircle, Bell, Info, Edit2
 } from "lucide-react";
 import {
   getNotificationPermission,
@@ -478,17 +478,6 @@ export default function Sidebar({ currentUser, currentView, isOpen, onNavigate, 
               >
                 <BookOpen size={20} className="text-slate-400" />
                 <span>التقارير الحسابية</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onClose();
-                  onNavigate("templates", "قوالب الرسائل");
-                }}
-                className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 text-slate-700 hover:text-slate-950 rounded-2xl transition font-bold text-right cursor-pointer"
-              >
-                <MessageSquare size={20} className="text-slate-400" />
-                <span>قوالب الرسائل</span>
               </button>
 
               <button
