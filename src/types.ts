@@ -145,7 +145,7 @@ export interface CashTransaction {
   date?: Timestamp;
 }
 
-export type TemplateType = "sms_single" | "wa_single" | "wa_multiple" | "wa_all";
+export type TemplateType = "sms_single" | "wa_single" | "wa_multiple" | "wa_all" | "market_rawi" | "market_mqawet";
 
 export interface MessageTemplate {
   id: string;
