@@ -87,7 +87,13 @@ service cloud.firestore {
       allow create: if (request.auth != null && request.resource.data.userId == request.auth.uid) || isAdmin();
     }
 
-    // 12. إغلاق أي مسارات أخرى لم يتم ذكرها للحماية المطلقة (الأدمن فقط)
+    // 12. قسم مقوت السوق
+    match /market_batches/{docId} {
+      allow read, update, delete: if (request.auth != null && resource.data.userId == request.auth.uid) || isAdmin();
+      allow create: if (request.auth != null && request.resource.data.userId == request.auth.uid) || isAdmin();
+    }
+
+    // 13. إغلاق أي مسارات أخرى لم يتم ذكرها للحماية المطلقة (الأدمن فقط)
     match /{document=**} {
       allow read, write: if isAdmin();
     }

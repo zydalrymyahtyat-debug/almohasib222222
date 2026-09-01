@@ -66,6 +66,34 @@ export interface Transaction {
   date?: Timestamp;
 }
 
+export interface MarketMqawetItem {
+  personId?: string;
+  name: string;
+  phone: string;
+  qty: number;
+  price: number;
+  baseVal: number;
+  comm: number;
+  totalRequired: number;
+}
+
+export interface MarketBatch {
+  id: string;
+  userId: string;
+  date: string;
+  rawiId?: string;
+  rawiName: string;
+  rawiPhone: string;
+  rawiQty: number;
+  rawiPrice: number;
+  commRawiPct: number;
+  commMqawetPct: number;
+  taxPct: number;
+  mqawetList: MarketMqawetItem[];
+  status: "in_progress" | "completed";
+  createdAt: Timestamp;
+}
+
 export interface Expense {
   id: string;
   userId: string;

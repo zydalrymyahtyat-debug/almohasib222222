@@ -36,6 +36,7 @@ interface NavState {
 import InventoryDashboard from "./components/InventoryDashboard";
 import CashBanksDashboard from "./components/CashBanksDashboard";
 import ReportsDashboard from "./components/ReportsDashboard";
+import MarketMqawetView from "./components/MarketMqawetView";
 import CalculatorModal from "./components/CalculatorModal";
 import MessageTemplatesView from "./components/MessageTemplatesView";
 import { Calculator } from "lucide-react";
@@ -963,8 +964,26 @@ export default function App() {
                 </div>
                 <h3 className="font-black text-sm text-slate-800">تقارير مخلّصة</h3>
               </div>
+
+              <div
+                onClick={() => handleNavigate("market_mqawet", "مقوت من السوق")}
+                className="p-5 bg-white border border-slate-100 rounded-2xl flex flex-col items-center text-center cursor-pointer shadow-sm active:scale-95 transition md:col-span-2"
+              >
+                <div className="p-3 bg-amber-50 text-amber-500 rounded-xl mb-3">
+                  <Leaf size={22} />
+                </div>
+                <h3 className="font-black text-sm text-slate-800">مقوت من السوق</h3>
+              </div>
             </div>
           </div>
+        )}
+
+        {currentView === "market_mqawet" && (
+          <MarketMqawetView
+            currentUser={currentUser}
+            userProfile={userProfile}
+            onNavigate={handleNavigate}
+          />
         )}
 
         {/* Global Multi-field Search Tool View */}
