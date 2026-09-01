@@ -17,7 +17,7 @@ interface Props {
 }
 
 export default function MarketMqawetView({ currentUser, userProfile, onNavigate }: Props) {
-  const [activeTab, setActiveTab] = useState<"entry" | "rawi-rep" | "mqawet-rep" | "master-rep">("entry");
+  const [activeTab, setActiveTab] = useState<"entry" | "clients" | "rawi-rep" | "mqawet-rep" | "master-rep">("entry");
 
   // Data State
   const [batches, setBatches] = useState<MarketBatch[]>([]);
@@ -39,6 +39,43 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   const [rawiFilter, setRawiFilter] = useState("ALL");
   const [mqawetFilter, setMqawetFilter] = useState("ALL");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Isolated Market Customers (from market_batches)
+  const getIsolatedClients = () => {
+     const clientsMap = new Map();
+
+     batches.forEach(b => {
+        // Rawi Client
+        if (b.rawiName) {
+           let totalVal = b.rawiQty * b.rawiPrice;
+           let commVal = totalVal * (b.commRawiPct / 100);
+           let taxVal = totalVal * (b.taxPct / 100);
+           let net = totalVal - commVal - taxVal;
+
+           if (!clientsMap.has(b.rawiName)) {
+              clientsMap.set(b.rawiName, { name: b.rawiName, phone: b.rawiPhone, type: 'rawi', balance: 0 });
+           }
+           const client = clientsMap.get(b.rawiName);
+           client.balance -= net; // له (Negative)
+           client.phone = client.phone || b.rawiPhone;
+        }
+
+        // Mqawet Clients
+        b.mqawetList.forEach(m => {
+           if (m.name) {
+              if (!clientsMap.has(m.name)) {
+                 clientsMap.set(m.name, { name: m.name, phone: m.phone, type: 'mqawet', balance: 0 });
+              }
+              const client = clientsMap.get(m.name);
+              client.balance += m.totalRequired; // عليه (Positive)
+              client.phone = client.phone || m.phone;
+           }
+        });
+     });
+
+     return Array.from(clientsMap.values());
+  };
+
 
   // Dropdown States
   const [openRawiDropdown, setOpenRawiDropdown] = useState(false);
@@ -324,87 +361,19 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       return alert("الكمية الموزعة أكبر من الكمية الموردة! يرجى تصحيح الكميات.");
     }
 
-    const confirm = window.confirm(`هل أنت متأكد من تصفية واعتماد الشحنة للرعوي (${rawiName}) وترحيلها للحسابات بشكل نهائي؟`);
+    const confirm = window.confirm(`هل أنت متأكد من اعتماد الشحنة للرعوي (${rawiName})؟ (لن يتم ترحيلها للحسابات العامة).`);
     if (!confirm) return;
 
     setIsSaving(true);
     try {
       const batchRef = writeBatch(db);
 
-      // 1. Process Rawi (Supplier)
-      let rId = "";
-      const existingRawi = persons.find(p => p.name === rawiName.trim() && p.type === "suppliers");
-      if (existingRawi) {
-        rId = existingRawi.id;
-        const newBalance = existingRawi.balance - netRawi; // "له" means negative balance in our system
-        batchRef.update(doc(db, "persons", rId), { balance: newBalance });
-      } else {
-        const newRawiRef = doc(collection(db, "persons"));
-        rId = newRawiRef.id;
-        batchRef.set(newRawiRef, {
-          userId: currentUser.uid,
-          name: rawiName.trim(),
-          phone: rawiPhone.trim(),
-          type: "suppliers",
-          balance: -netRawi,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      // Record Rawi Transaction
-      const rTxRef = doc(collection(db, "transactions"));
-      batchRef.set(rTxRef, {
-         userId: currentUser.uid,
-         personId: rId,
-         type: "credit", // له
-         amount: netRawi,
-         note: `مشتريات/توريد مقوت السوق (كمية ${qtyVal})`,
-         section: "suppliers",
-         createdAt: new Date(opDate + "T12:00:00")
-      });
-
-      // 2. Process Mqawets (Customers)
       const validMqawets = computedMqawetList.filter(m => m.name && m.qty > 0);
-      for (const m of validMqawets) {
-        let mId = m.personId || "";
-        const existingM = persons.find(p => p.name === m.name.trim() && p.type === "customers");
 
-        if (existingM) {
-          mId = existingM.id;
-          const newBalance = existingM.balance + m.totalRequired; // "عليه" means positive balance
-          batchRef.update(doc(db, "persons", mId), { balance: newBalance });
-        } else {
-          const newMRef = doc(collection(db, "persons"));
-          mId = newMRef.id;
-          batchRef.set(newMRef, {
-            userId: currentUser.uid,
-            name: m.name.trim(),
-            phone: m.phone.trim(),
-            type: "customers",
-            balance: m.totalRequired,
-            createdAt: serverTimestamp()
-          });
-          m.personId = mId; // update local ref
-        }
-
-        // Record Mqawet Transaction
-        const mTxRef = doc(collection(db, "transactions"));
-        batchRef.set(mTxRef, {
-           userId: currentUser.uid,
-           personId: mId,
-           type: "debt", // عليه
-           amount: m.totalRequired,
-           note: `مسحوبات مقوت السوق من الرعوي (${rawiName.trim()}) - كمية ${m.qty}`,
-           section: "customers",
-           createdAt: new Date(opDate + "T12:00:00")
-        });
-      }
-
-      // 3. Mark Batch as completed
+      // Mark Batch as completed (Isolated from Main Ledger)
       const batchData = {
         userId: currentUser.uid,
         date: opDate,
-        rawiId: rId,
         rawiName: rawiName.trim(),
         rawiPhone: rawiPhone.trim(),
         rawiQty: qtyVal,
@@ -425,18 +394,18 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       }
 
       await batchRef.commit();
-      alert("تم اعتماد الشحنة وترحيل الحسابات بنجاح!");
+      alert("تم اعتماد الشحنة بنجاح في قسم المقاوتة!");
       setActiveBatchId(null); // start fresh
     } catch (e) {
       console.error(e);
-      alert("حدث خطأ أثناء التصفية والترحيل.");
+      alert("حدث خطأ أثناء الاعتماد.");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDeleteBatch = async (batchId: string) => {
-    const confirmDelete = window.confirm("هل أنت متأكد من حذف هذه العملية؟ سيتم حذف جميع البيانات وعكس الحسابات المرتبطة بها.");
+    const confirmDelete = window.confirm("هل أنت متأكد من حذف هذه العملية؟");
     if (!confirmDelete) return;
 
     const b = batches.find(x => x.id === batchId);
@@ -444,68 +413,8 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
     setIsSaving(true);
     try {
-      if (b.status === "in_progress") {
-        // Just delete the batch, no ledger changes
-        await deleteDoc(doc(db, "market_batches", batchId));
-        alert("تم الحذف بنجاح!");
-      } else if (b.status === "completed") {
-        // Need to reverse ledger transactions
-        const batchRef = writeBatch(db);
-
-        // 1. Reverse Rawi (Supplier)
-        let totalVal = b.rawiQty * b.rawiPrice;
-        let commVal = totalVal * (b.commRawiPct / 100);
-        let taxVal = totalVal * (b.taxPct / 100);
-        let rNet = totalVal - commVal - taxVal;
-
-        if (b.rawiId) {
-          const rawiPerson = persons.find(p => p.id === b.rawiId);
-          if (rawiPerson) {
-             // He was credited (-), so we add back (+)
-             batchRef.update(doc(db, "persons", b.rawiId), { balance: rawiPerson.balance + rNet });
-
-             // Add reversing transaction
-             const rTxRef = doc(collection(db, "transactions"));
-             batchRef.set(rTxRef, {
-                userId: currentUser.uid,
-                personId: b.rawiId,
-                type: "debt", // عكس credit
-                amount: rNet,
-                note: `عكس قيد تسوية مقوت السوق (إلغاء شحنة ${b.date})`,
-                section: "suppliers",
-                createdAt: serverTimestamp()
-             });
-          }
-        }
-
-        // 2. Reverse Mqawets (Customers)
-        for (const m of b.mqawetList) {
-          if (m.personId) {
-            const mPerson = persons.find(p => p.id === m.personId);
-            if (mPerson) {
-              // He was debited (+), so we subtract (-)
-              batchRef.update(doc(db, "persons", m.personId), { balance: mPerson.balance - m.totalRequired });
-
-              // Add reversing transaction
-              const mTxRef = doc(collection(db, "transactions"));
-              batchRef.set(mTxRef, {
-                 userId: currentUser.uid,
-                 personId: m.personId,
-                 type: "credit", // عكس debt
-                 amount: m.totalRequired,
-                 note: `عكس قيد تسوية مقوت السوق (إلغاء شحنة ${b.date})`,
-                 section: "customers",
-                 createdAt: serverTimestamp()
-              });
-            }
-          }
-        }
-
-        // Delete the batch doc entirely or mark as deleted
-        batchRef.delete(doc(db, "market_batches", batchId));
-        await batchRef.commit();
-        alert("تم الحذف وعكس القيود بنجاح!");
-      }
+      await deleteDoc(doc(db, "market_batches", batchId));
+      alert("تم الحذف بنجاح!");
 
       if (activeBatchId === batchId) {
         setActiveBatchId(null);
@@ -948,6 +857,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
         <div className="flex bg-white/20 p-1 rounded-2xl gap-1 overflow-x-auto no-scrollbar">
           {[
             { id: "entry", label: "التوزيع" },
+            { id: "clients", label: "العملاء" },
             { id: "rawi-rep", label: "كشف الرعية" },
             { id: "mqawet-rep", label: "كشف المقاوتة" },
             { id: "master-rep", label: "التقرير الشامل" }
@@ -955,7 +865,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex-1 min-w-[80px] py-2 px-2 text-xs font-black rounded-xl transition-all whitespace-nowrap ${
+              className={`flex-1 min-w-[55px] py-2 px-1 text-[9px] sm:text-[11px] font-black rounded-xl transition-all whitespace-nowrap ${
                 activeTab === tab.id
                   ? "bg-white text-amber-600 shadow-sm"
                   : "text-amber-50 hover:bg-white/10"
@@ -968,6 +878,43 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       </div>
 
       <div className="p-4 pb-24">
+        {activeTab === "clients" && (
+          <div className="space-y-4 max-w-2xl mx-auto">
+             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                <h3 className="font-black text-slate-800 text-lg flex items-center gap-2 mb-2"><User size={20} className="text-amber-500"/> أرصدة عملاء السوق (مستقلة)</h3>
+                <p className="text-xs text-slate-500 font-bold leading-relaxed">
+                   تعرض هذه الشاشة حسابات (الرعية والمقاوتة) المستنتجة من حركة شحنات التوزيع فقط، وهي مفصولة تماماً عن الحسابات العامة (سندات القبض والصرف).
+                </p>
+             </div>
+
+             <div className="space-y-3">
+               {getIsolatedClients().map((client, i) => (
+                 <div key={i} className={`bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center ${client.type === 'rawi' ? 'border-r-4 border-r-amber-500' : 'border-r-4 border-r-indigo-500'}`}>
+                   <div>
+                      <div className="font-black text-slate-800 text-base">{client.name}</div>
+                      <div className="text-[10px] font-bold text-slate-500 flex gap-2 mt-1">
+                         <span className={`px-2 py-0.5 rounded-md ${client.type === 'rawi' ? 'bg-amber-50 text-amber-600' : 'bg-indigo-50 text-indigo-600'}`}>{client.type === 'rawi' ? 'رعوي (مورد)' : 'مقوت (مستلم)'}</span>
+                         {client.phone && <span dir="ltr">{client.phone}</span>}
+                      </div>
+                   </div>
+                   <div className="text-left">
+                      <span className="block text-[10px] text-slate-400 font-bold">الرصيد الكلي</span>
+                      <span className={`font-black text-lg ${client.balance > 0 ? 'text-rose-500' : client.balance < 0 ? 'text-emerald-500' : 'text-slate-600'}`}>
+                         {Math.abs(client.balance).toLocaleString()} ريال
+                      </span>
+                      <span className={`block text-[10px] font-black ${client.balance > 0 ? 'text-rose-500' : client.balance < 0 ? 'text-emerald-500' : 'text-slate-400'}`}>
+                         {client.balance > 0 ? '(عليه - مطلوب)' : client.balance < 0 ? '(له - مستحق)' : 'صفر'}
+                      </span>
+                   </div>
+                 </div>
+               ))}
+               {getIsolatedClients().length === 0 && (
+                 <div className="text-center p-8 bg-slate-100 rounded-2xl text-slate-400 font-bold text-sm">لا يوجد عملاء مسجلين في السوق بعد.</div>
+               )}
+             </div>
+          </div>
+        )}
+
         {activeTab === "entry" && (
           <div className="space-y-4 max-w-2xl mx-auto">
             {/* Queue Box */}
