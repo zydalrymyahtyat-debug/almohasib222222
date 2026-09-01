@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, getDocs, writeBatch } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, getDocs, writeBatch, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { Person, MarketBatch, MarketMqawetItem, UserProfile } from "../types";
 import { ArrowRight, Plus, Save, Trash2, Printer, Search, Phone, User, Package, Leaf, Store } from "lucide-react";
@@ -183,6 +183,10 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
   const pickContact = async (callback: (name: string, phone: string) => void) => {
     try {
+      if (!Contacts || !Contacts.requestPermissions) {
+        alert("ميزة جهات الاتصال مدعومة فقط في تطبيق الهاتف.");
+        return;
+      }
       const permission = await Contacts.requestPermissions();
       if (permission.contacts !== "granted") {
         alert("يرجى منح صلاحية الوصول لجهات الاتصال من إعدادات الجهاز.");
@@ -196,9 +200,11 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
         const phone = result.contact.phones?.[0]?.number || "";
         callback(name, phone);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error picking contact:", e);
-      // Ignore if user cancelled or not on a supported platform
+      if (e?.message?.includes("implemented on web")) {
+        alert("ميزة اختيار جهات الاتصال تعمل فقط من خلال تطبيق الهاتف.");
+      }
     }
   };
 
@@ -393,7 +399,8 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
     try {
       if (b.status === "in_progress") {
         // Just delete the batch, no ledger changes
-        await updateDoc(doc(db, "market_batches", batchId), { status: "deleted" }); // Or actual delete
+        await deleteDoc(doc(db, "market_batches", batchId));
+        alert("تم الحذف بنجاح!");
       } else if (b.status === "completed") {
         // Need to reverse ledger transactions
         const batchRef = writeBatch(db);
@@ -520,6 +527,30 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
           : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
 
       window.open(url, '_blank');
+  };
+
+  const shareRawiSMS = (b: MarketBatch) => {
+      let totalVal = b.rawiQty * b.rawiPrice;
+      let commVal = totalVal * (b.commRawiPct / 100);
+      let taxVal = totalVal * (b.taxPct / 100);
+      let net = totalVal - commVal - taxVal;
+
+      // Keep it short for SMS
+      let msg = `فاتورة الرعوي: ${b.rawiName}\n`;
+      msg += `تاريخ: ${b.date}\n`;
+      msg += `الكمية: ${b.rawiQty} بسعر ${b.rawiPrice.toLocaleString()}\n`;
+      msg += `العمولة: ${commVal.toLocaleString()}\n`;
+      if (taxVal > 0) msg += `الضريبة: ${taxVal.toLocaleString()}\n`;
+      msg += `الصافي: ${net.toLocaleString()} ريال\n`;
+
+      let cleanPhone = b.rawiPhone ? b.rawiPhone.replace(/[^0-9]/g, '') : '';
+      if (!cleanPhone) {
+        alert("لا يوجد رقم هاتف للرعوي.");
+        return;
+      }
+
+      let url = `sms:${cleanPhone}?body=${encodeURIComponent(msg)}`;
+      window.open(url, '_self');
   };
 
   const shareMqawetWhatsApp = (name: string, phone: string) => {
@@ -747,19 +778,19 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                 </div>
               </div>
 
-              <h3 className="font-black text-slate-800 text-sm mb-3 pt-2 border-t border-slate-100">النسب والعمولات (%)</h3>
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                <div>
+              <h3 className="font-black text-slate-800 text-sm mb-3 pt-4 border-t border-slate-100">النسب والعمولات (%)</h3>
+              <div className="flex gap-2 mb-6 bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                <div className="flex-1 flex flex-col items-center">
                   <label className="text-[10px] font-black text-slate-500 block mb-1">من الرعوي</label>
-                  <input type="number" value={commRawiPct} onChange={(e) => setCommRawiPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 text-center" />
+                  <input type="number" value={commRawiPct} onChange={(e) => setCommRawiPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-slate-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 text-center" />
                 </div>
-                <div>
+                <div className="flex-1 flex flex-col items-center border-r border-slate-200 pr-2">
                   <label className="text-[10px] font-black text-slate-500 block mb-1">من المقوت</label>
-                  <input type="number" value={commMqawetPct} onChange={(e) => setCommMqawetPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 text-center" />
+                  <input type="number" value={commMqawetPct} onChange={(e) => setCommMqawetPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-slate-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 text-center" />
                 </div>
-                <div>
+                <div className="flex-1 flex flex-col items-center border-r border-slate-200 pr-2">
                   <label className="text-[10px] font-black text-slate-500 block mb-1">الضريبة</label>
-                  <input type="number" value={taxPct} onChange={(e) => setTaxPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 text-center text-rose-500" />
+                  <input type="number" value={taxPct} onChange={(e) => setTaxPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-rose-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-rose-500 text-center text-rose-600" />
                 </div>
               </div>
 
@@ -977,6 +1008,9 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                            <button onClick={() => shareRawiWhatsApp(op)} className="flex-1 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
                               مشاركة التصفية عبر واتساب
                            </button>
+                           <button onClick={() => shareRawiSMS(op)} className="w-12 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
+                              <span className="font-black text-[10px]">SMS</span>
+                           </button>
                         </div>
                      </div>
                    );
@@ -1027,9 +1061,18 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                            <span className="text-rose-600">{total.toLocaleString()} ريال</span>
                         </div>
 
-                        <button onClick={() => shareMqawetWhatsApp(name, data.phone)} className="w-full mt-4 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
-                           مشاركة الكشف عبر واتساب
-                        </button>
+                        <div className="flex gap-2 mt-4">
+                           <button onClick={() => shareMqawetWhatsApp(name, data.phone)} className="flex-1 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
+                              مشاركة الكشف عبر واتساب
+                           </button>
+                           <button onClick={() => {
+                              let msg = `فاتورة المقوت: ${name}\nالمطلوب إجمالي: ${total.toLocaleString()} ريال\n`;
+                              let url = `sms:${data.phone || ''}?body=${encodeURIComponent(msg)}`;
+                              window.open(url, '_self');
+                           }} className="w-12 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
+                              <span className="font-black text-[10px]">SMS</span>
+                           </button>
+                        </div>
                      </div>
                    );
                 })
@@ -1039,7 +1082,18 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
         {activeTab === "master-rep" && (
           <div className="space-y-4 max-w-4xl mx-auto overflow-x-auto pb-4">
-             <div className="bg-slate-900 rounded-3xl p-5 text-white shadow-lg flex flex-wrap gap-4 justify-between items-center min-w-[600px]">
+             <div className="flex justify-between items-center">
+                <h3 className="font-black text-slate-800 text-lg">التقرير المجمع الشامل</h3>
+                <button
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-indigo-50 text-indigo-600 font-black rounded-xl hover:bg-indigo-100 transition flex items-center gap-2"
+                >
+                  <Printer size={16} />
+                  طباعة الكشف
+                </button>
+             </div>
+
+             <div className="bg-slate-900 rounded-3xl p-5 text-white shadow-lg flex flex-wrap gap-4 justify-between items-center min-w-[600px] print:hidden">
                 <div>
                    <span className="block text-xs text-slate-400 font-bold mb-1">مجموع التوريد</span>
                    <span className="text-lg font-black">{toArabicDigits(batches.reduce((s,b) => s + (b.rawiQty*b.rawiPrice),0).toLocaleString())} ريال</span>
