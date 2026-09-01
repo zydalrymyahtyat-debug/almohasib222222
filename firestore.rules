@@ -63,7 +63,8 @@ service cloud.firestore {
     // 9. طلبات تصريح الأجهزة (ميزة ربط الأجهزة)
     match /deviceRequests/{docId} {
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if isAdmin();
+      allow read: if (request.auth != null && resource.data.userId == request.auth.uid) || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // 10. السماح بظهور التحديثات والإشعارات للجميع وتعديلها للأدمن فقط
