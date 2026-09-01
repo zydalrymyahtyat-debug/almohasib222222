@@ -212,9 +212,9 @@ export default function StatementView({ currentUser, personId, personName, perso
 
   const getPersonPrefix = () => {
     if (section === "qat_fields") return "المشروع";
-    if (person.gender === "male") return "أستاذ";
-    if (person.gender === "female") return "أستاذة";
-    return "أستاذ/ة";
+    if (person.gender === "male") return "السيد";
+    if (person.gender === "female") return "السيدة";
+    return "السيد/ة";
   };
 
   // Dedicated SMS sender: highly brief
