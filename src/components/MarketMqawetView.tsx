@@ -693,6 +693,71 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       doPrint(html);
   };
 
+  const printMasterReport = () => {
+    let totalSupply = batches.reduce((s, b) => s + (b.rawiQty * b.rawiPrice), 0);
+    let totalComm = batches.reduce((s, b) => s + (b.rawiQty * b.rawiPrice * (b.commRawiPct / 100)) + b.mqawetList.reduce((ss, m) => ss + m.comm, 0), 0);
+    let totalTax = batches.reduce((s, b) => s + (b.rawiQty * b.rawiPrice * (b.taxPct / 100)), 0);
+
+    let html = `
+      <div style="direction: rtl; font-family: 'Cairo', sans-serif; padding: 20px; color: black; background: white;">
+        <h2 style="text-align:center; border-bottom: 2px solid #333; padding-bottom: 10px;">التقرير المجمع الشامل (مقوت السوق)</h2>
+
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px; border: 1px solid #cbd5e1; padding: 15px; border-radius: 8px;">
+           <div>
+             <strong>مجموع التوريد:</strong> ${totalSupply.toLocaleString()} ريال
+           </div>
+           <div>
+             <strong>إجمالي أرباح المصلح:</strong> ${totalComm.toLocaleString()} ريال
+           </div>
+           <div>
+             <strong>إجمالي الضرائب:</strong> ${totalTax.toLocaleString()} ريال
+           </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+          <thead>
+            <tr style="background-color: #f1f5f9;">
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">التاريخ</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">الرعوي</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">كمية/سعر</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">المقوت (المستلم)</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">كمية السحب</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">مطلوب من المقوت</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px;">صافي الرعوي</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    if (batches.length === 0) {
+      html += `<tr><td colspan="7" style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">لا توجد حركات مسجلة.</td></tr>`;
+    } else {
+      batches.forEach(op => {
+        op.mqawetList.forEach((m, idx) => {
+          let rawiNet = ((m.baseVal) - (m.baseVal * (op.commRawiPct / 100))).toLocaleString();
+          html += `
+            <tr>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${op.date}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${op.rawiName}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${op.rawiQty} بـ ${op.rawiPrice.toLocaleString()}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.name}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.qty}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.totalRequired.toLocaleString()}</td>
+              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${rawiNet}</td>
+            </tr>
+          `;
+        });
+      });
+    }
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+    doPrint(html);
+  };
+
   const printMqawetReport = (name: string) => {
       let records: any[] = [];
       batches.forEach(op => {
@@ -846,6 +911,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
               if (!mqawetGroups[m.name]) mqawetGroups[m.name] = { phone: m.phone, records: [] };
               if (m.phone && m.phone !== '-') mqawetGroups[m.name].phone = m.phone;
               mqawetGroups[m.name].records.push({
+                  batchId: op.id,
                   date: op.date,
                   rawiName: op.rawiName || 'رعوي مجهول',
                   qty: m.qty,
@@ -1003,33 +1069,42 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                 </div>
               </div>
 
-              <h3 className="font-black text-slate-800 text-sm mb-3 pt-4 border-t border-slate-100">النسب والعمولات (%)</h3>
-              <div className="flex gap-2 mb-6 bg-slate-50 p-2 rounded-2xl border border-slate-100">
-                <div className="flex-1 flex flex-col items-center">
-                  <label className="text-[10px] font-black text-slate-500 block mb-1">من الرعوي</label>
-                  <input type="number" value={commRawiPct} onChange={(e) => setCommRawiPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-slate-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 text-center" />
-                </div>
-                <div className="flex-1 flex flex-col items-center border-r border-slate-200 pr-2">
-                  <label className="text-[10px] font-black text-slate-500 block mb-1">من المقوت</label>
-                  <input type="number" value={commMqawetPct} onChange={(e) => setCommMqawetPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-slate-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 text-center" />
-                </div>
-                <div className="flex-1 flex flex-col items-center border-r border-slate-200 pr-2">
-                  <label className="text-[10px] font-black text-slate-500 block mb-1">الضريبة</label>
-                  <input type="number" value={taxPct} onChange={(e) => setTaxPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-rose-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-rose-500 text-center text-rose-600" />
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-6">
+                <h3 className="font-black text-slate-800 text-sm mb-3 flex items-center gap-2">
+                   <Leaf size={16} className="text-emerald-500"/> النسب والعمولات (%)
+                </h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="flex flex-col items-center bg-white p-2 rounded-xl shadow-sm border border-slate-100">
+                    <label className="text-[10px] font-black text-slate-500 block mb-1">من الرعوي</label>
+                    <input type="number" value={commRawiPct} onChange={(e) => setCommRawiPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-slate-50 border border-slate-100 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 focus:bg-white transition text-center" />
+                  </div>
+                  <div className="flex flex-col items-center bg-white p-2 rounded-xl shadow-sm border border-slate-100">
+                    <label className="text-[10px] font-black text-slate-500 block mb-1">من المقوت</label>
+                    <input type="number" value={commMqawetPct} onChange={(e) => setCommMqawetPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-slate-50 border border-slate-100 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-amber-500 focus:bg-white transition text-center" />
+                  </div>
+                  <div className="flex flex-col items-center bg-rose-50 p-2 rounded-xl shadow-sm border border-rose-100">
+                    <label className="text-[10px] font-black text-rose-500 block mb-1">الضريبة</label>
+                    <input type="number" value={taxPct} onChange={(e) => setTaxPct(e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} placeholder="0%" className="w-full bg-white border border-rose-200 py-1.5 px-1 rounded-lg text-sm font-bold outline-none focus:border-rose-500 text-center text-rose-600 transition" />
+                  </div>
                 </div>
               </div>
 
               {/* Distribution */}
-              <h3 className="font-black text-slate-800 text-sm mb-3 flex justify-between items-center">
-                <span>توزيع الكمية على المقاوتة</span>
-                {remainingQty < 0 && <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-lg">تجاوزت الكمية الموردة!</span>}
-              </h3>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
+                  <Store size={18} className="text-indigo-500"/> توزيع الكمية على المقاوتة
+                </h3>
+                {remainingQty < 0 && <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-lg shadow-sm border border-rose-200 animate-pulse">⚠️ تجاوزت الكمية الموردة!</span>}
+              </div>
 
               <div className="space-y-3 mb-4">
                 {computedMqawetList.map((m, idx) => (
-                  <div key={idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3">
-                    <div className="flex gap-2 mb-2">
-                      <div className="flex-1 relative">
+                  <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm hover:border-amber-300 transition-colors group">
+                    <div className="flex gap-2 mb-2 relative">
+                      <div className="absolute -right-2 -top-2 bg-slate-800 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm z-10">
+                         {idx + 1}
+                      </div>
+                      <div className="flex-1 relative mr-3">
                         <input
                           type="text"
                           placeholder="اسم المقوت..."
@@ -1040,7 +1115,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                             handleUpdateMqawetRow(idx, "name", e.target.value);
                             setOpenMqawetDropdownIndex(idx);
                           }}
-                          className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                          className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 focus:bg-white transition"
                         />
                         {openMqawetDropdownIndex === idx && (
                           <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto mt-1 py-1">
@@ -1054,7 +1129,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                                   handleUpdateMqawetRow(idx, "phone", p.phone || "");
                                   setOpenMqawetDropdownIndex(null);
                                 }}
-                                className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0 flex justify-between items-center"
+                                className="px-4 py-2 hover:bg-amber-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0 flex justify-between items-center"
                               >
                                 <span>{p.name}</span>
                                 {p.phone && <span className="text-[10px] text-slate-400" dir="ltr">{p.phone}</span>}
@@ -1070,7 +1145,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                                   handleUpdateMqawetRow(idx, "name", n);
                                   setOpenMqawetDropdownIndex(null);
                                 }}
-                                className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0"
+                                className="px-4 py-2 hover:bg-amber-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0"
                               >
                                 {n}
                               </div>
@@ -1078,25 +1153,25 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                           </div>
                         )}
                       </div>
-                      <button onClick={() => handlePickMqawetContact(idx)} className="w-10 flex items-center justify-center bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition shrink-0" title="اختيار من جهات الاتصال">
+                      <button onClick={() => handlePickMqawetContact(idx)} className="w-10 flex items-center justify-center bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 hover:text-slate-800 transition shrink-0" title="اختيار من جهات الاتصال">
                         <Phone size={16} />
                       </button>
                       <div className="w-20 shrink-0">
-                        <input type="number" placeholder="الكمية" value={m.qty || ""} onChange={(e) => handleUpdateMqawetRow(idx, "qty", e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 text-center" />
+                        <input type="number" placeholder="الكمية" value={m.qty || ""} onChange={(e) => handleUpdateMqawetRow(idx, "qty", e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 focus:bg-white transition text-center" />
                       </div>
-                      <button onClick={() => handleRemoveMqawetRow(idx)} className="w-10 flex items-center justify-center bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition shrink-0" title="حذف المقوت">
+                      <button onClick={() => handleRemoveMqawetRow(idx)} className="w-10 flex items-center justify-center bg-rose-50 text-rose-400 rounded-xl hover:bg-rose-500 hover:text-white transition shrink-0" title="حذف المقوت">
                         <Trash2 size={16} />
                       </button>
                     </div>
                     {/* Computed feedback */}
-                    <div className="flex justify-between text-[10px] font-black text-slate-500 bg-slate-100 p-1.5 rounded-lg">
+                    <div className="flex justify-between text-[10px] font-black text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100 ml-12">
                       <span>السعر: {toArabicDigits(m.price)}</span>
-                      <span>إجمالي المطلوب: <span className="text-amber-600">{toArabicDigits(m.totalRequired)}</span></span>
+                      <span>إجمالي المطلوب: <span className="text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md">{toArabicDigits(m.totalRequired)}</span></span>
                     </div>
                     {m.name && (
-                      <div className="mt-1 text-[10px] font-bold text-indigo-500 flex justify-between">
-                         <span>السحبيات السابقة للمقوت: {toArabicDigits(getMqawetHistoricalDebt(m.name, activeBatchId || undefined))} ريال</span>
-                         {m.phone && <span dir="ltr">{m.phone}</span>}
+                      <div className="mt-2 ml-12 text-[10px] font-bold text-indigo-500 flex justify-between items-center bg-indigo-50/50 p-1.5 rounded-lg border border-indigo-100/50">
+                         <span>سحبيات سابقة: {toArabicDigits(getMqawetHistoricalDebt(m.name, activeBatchId || undefined))} ريال</span>
+                         {m.phone && <span dir="ltr" className="text-slate-400 bg-white px-1 rounded text-[9px] border border-slate-200">{m.phone}</span>}
                       </div>
                     )}
                   </div>
@@ -1281,12 +1356,15 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                              </div>
                            )}
                            {data.records.map((r: any, idx: number) => (
-                              <div key={idx} className="bg-slate-50 border-r-4 border-indigo-400 p-3 rounded-lg text-xs leading-relaxed text-slate-700 font-bold border border-slate-100">
+                              <div key={idx} className="bg-slate-50 border-r-4 border-indigo-400 p-3 rounded-lg text-xs leading-relaxed text-slate-700 font-bold border border-slate-100 relative group">
                                  📅 التاريخ: {r.date} <br/>
                                  📌 أخذت من الرعوي <strong>({r.rawiName})</strong> كمية <strong>({r.qty})</strong> بسعر <strong>({r.price.toLocaleString()})</strong> <br/>
                                  القيمة ({r.baseVal.toLocaleString()}) + عمولة ({r.comm.toLocaleString()}) <br/>
-                                 <div className="mt-1 pt-1 border-t border-slate-200 text-indigo-600 font-black">
-                                    المطلوب في هذه السحبة: {r.totalRequired.toLocaleString()} ريال
+                                 <div className="mt-1 pt-1 border-t border-slate-200 text-indigo-600 font-black flex justify-between items-center">
+                                    <span>المطلوب في هذه السحبة: {r.totalRequired.toLocaleString()} ريال</span>
+                                    <button onClick={() => handleDeleteBatch(r.batchId)} className="w-8 h-8 flex items-center justify-center bg-rose-50 text-rose-500 rounded-lg hover:bg-rose-100 transition shrink-0" title="حذف العملية">
+                                      <Trash2 size={14} />
+                                    </button>
                                  </div>
                               </div>
                            ))}
@@ -1320,34 +1398,34 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
         )}
 
         {activeTab === "master-rep" && (
-          <div className="space-y-4 max-w-4xl mx-auto overflow-x-auto pb-4">
-             <div className="flex justify-between items-center">
+          <div className="space-y-4 max-w-4xl mx-auto pb-4 w-full">
+             <div className="flex justify-between items-center mb-4">
                 <h3 className="font-black text-slate-800 text-lg">التقرير المجمع الشامل</h3>
                 <button
-                  onClick={() => window.print()}
+                  onClick={printMasterReport}
                   className="px-4 py-2 bg-indigo-50 text-indigo-600 font-black rounded-xl hover:bg-indigo-100 transition flex items-center gap-2"
                 >
                   <Printer size={16} />
-                  طباعة الكشف
+                  <span className="hidden sm:inline">طباعة الكشف</span>
                 </button>
              </div>
 
-             <div className="bg-slate-900 rounded-3xl p-5 text-white shadow-lg flex flex-wrap gap-4 justify-between items-center min-w-[600px] print:hidden">
-                <div>
+             <div className="bg-slate-900 rounded-3xl p-5 text-white shadow-lg grid grid-cols-1 md:grid-cols-3 gap-4 print:hidden w-full">
+                <div className="bg-slate-800 p-3 rounded-xl flex flex-col items-center justify-center text-center">
                    <span className="block text-xs text-slate-400 font-bold mb-1">مجموع التوريد</span>
                    <span className="text-lg font-black">{toArabicDigits(batches.reduce((s,b) => s + (b.rawiQty*b.rawiPrice),0).toLocaleString())} ريال</span>
                 </div>
-                <div>
+                <div className="bg-slate-800 p-3 rounded-xl flex flex-col items-center justify-center text-center">
                    <span className="block text-xs text-slate-400 font-bold mb-1">إجمالي أرباح المصلح</span>
                    <span className="text-lg font-black text-amber-400">{toArabicDigits(batches.reduce((s,b) => s + (b.rawiQty*b.rawiPrice*(b.commRawiPct/100)) + b.mqawetList.reduce((ss,m)=>ss+m.comm,0),0).toLocaleString())} ريال</span>
                 </div>
-                <div>
+                <div className="bg-slate-800 p-3 rounded-xl flex flex-col items-center justify-center text-center">
                    <span className="block text-xs text-slate-400 font-bold mb-1">إجمالي الضرائب</span>
                    <span className="text-lg font-black text-rose-400">{toArabicDigits(batches.reduce((s,b) => s + (b.rawiQty*b.rawiPrice*(b.taxPct/100)),0).toLocaleString())} ريال</span>
                 </div>
              </div>
 
-             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden min-w-[800px]">
+             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-x-auto w-full">
                 <table className="w-full text-sm text-right">
                    <thead className="bg-slate-50 text-slate-500 font-black text-xs">
                       <tr>
