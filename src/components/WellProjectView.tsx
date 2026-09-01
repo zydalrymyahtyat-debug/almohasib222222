@@ -141,6 +141,9 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
 
   // New Watering Form
   const [wateringDate, setWateringDate] = useState(() => new Date().toISOString().substring(0, 10));
+  const [registrationMode, setRegistrationMode] = useState<"detailed" | "fast">("detailed");
+
+  // Detailed Mode State
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [dieselDelivered, setDieselDelivered] = useState<number | "">("");
@@ -149,6 +152,13 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
   const [customHourlyRate, setCustomHourlyRate] = useState<number | "">("");
   const [customDieselPrice, setCustomDieselPrice] = useState<number | "">("");
   const [wateringNote, setWateringNote] = useState("");
+
+  // Fast Mode State
+  const [fastPowerSource, setFastPowerSource] = useState("ديزل");
+  const [fastHours, setFastHours] = useState("");
+  const [fastMinutes, setFastMinutes] = useState("");
+  const [fastHourlyRate, setFastHourlyRate] = useState("");
+  const [fastNotes, setFastNotes] = useState("");
 
   // New Payment Form
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().substring(0, 10));
@@ -553,42 +563,84 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
     setSelectedFarmer(null);
   };
 
-  // Calculate watering hours automatically
-  const getWateringDurationHours = () => {
-    if (!startTime || !endTime) return 0;
+  // Calculate watering time details automatically
+  const getWateringDuration = () => {
+    if (registrationMode === "fast") {
+      const h = Number(fastHours) || 0;
+      const m = Number(fastMinutes) || 0;
+      const totalMinutes = (h * 60) + m;
+      return {
+        hours: h,
+        minutes: m,
+        totalMinutes,
+        decimalHours: Number((totalMinutes / 60).toFixed(4)),
+        formatted: m > 0 ? `${h} ساعة و ${m} دقيقة` : `${h} ساعة`,
+        displayString: `${h}:${m.toString().padStart(2, '0')}`
+      };
+    }
+
+    if (!startTime || !endTime) return { hours: 0, minutes: 0, totalMinutes: 0, decimalHours: 0, formatted: "0 ساعة", displayString: "0:00" };
     const [hStart, mStart] = startTime.split(":").map(Number);
     const [hEnd, mEnd] = endTime.split(":").map(Number);
     let diffMinutes = (hEnd * 60 + mEnd) - (hStart * 60 + mStart);
     if (diffMinutes < 0) diffMinutes += 24 * 60; // crossover midnight
-    return Number((diffMinutes / 60).toFixed(2));
+
+    const h = Math.floor(diffMinutes / 60);
+    const m = diffMinutes % 60;
+    return {
+      hours: h,
+      minutes: m,
+      totalMinutes: diffMinutes,
+      decimalHours: Number((diffMinutes / 60).toFixed(4)),
+      formatted: m > 0 ? `${h} ساعة و ${m} دقيقة` : `${h} ساعة`,
+      displayString: `${h}:${m.toString().padStart(2, '0')}`
+    };
+  };
+
+  // Used only for the UI where it expects a single number currently
+  const getWateringDurationHours = () => {
+    return getWateringDuration().decimalHours;
   };
 
   // Calculate Watering Cost Details
   const getWateringCostDetails = () => {
-    const totalHours = getWateringDurationHours();
-    const rateHour = customHourlyRate !== "" ? Number(customHourlyRate) : settings.hourlyWellRate;
-    const diesel20L = customDieselPrice !== "" ? Number(customDieselPrice) : settings.diesel20LPrice;
+    const duration = getWateringDuration();
+
+    let rateHour = settings.hourlyWellRate;
+    let delLit = 0;
+    let usedLit = 0;
+    let diesel20L = settings.diesel20LPrice;
+
+    if (registrationMode === "detailed") {
+      if (customHourlyRate !== "") rateHour = Number(customHourlyRate);
+      if (customDieselPrice !== "") diesel20L = Number(customDieselPrice);
+      if (dieselDelivered !== "") delLit = Number(dieselDelivered);
+      if (dieselUsed !== "") usedLit = Number(dieselUsed);
+    } else {
+      if (fastHourlyRate !== "") rateHour = Number(fastHourlyRate);
+    }
+
     const pricePerLiter = diesel20L / 20;
 
-    const hoursCost = Math.round(totalHours * rateHour);
-    const delLit = dieselDelivered !== "" ? Number(dieselDelivered) : 0;
-    const usedLit = dieselUsed !== "" ? Number(dieselUsed) : 0;
+    // Use totalMinutes to prevent rounding errors before final cost
+    const hoursCost = Math.round((duration.totalMinutes / 60) * rateHour);
+
     const remainingLit = Number((delLit - usedLit).toFixed(2));
 
     // Cost of extra diesel consumed from well (or credit for surplus diesel)
-    // used > delivered means well supplied extra diesel -> charge the farmer.
-    // used < delivered means farmer brought surplus diesel -> reward/discount.
-    const dieselAdjustmentCost = Math.round((usedLit - delLit) * pricePerLiter);
+    const dieselAdjustmentCost = registrationMode === "detailed" ? Math.round((usedLit - delLit) * pricePerLiter) : 0;
     const totalCost = Math.max(0, hoursCost + dieselAdjustmentCost);
 
     return {
-      totalHours,
+      duration,
       rateHour,
       pricePerLiter,
       hoursCost,
       remainingLit,
       dieselAdjustmentCost,
-      totalCost
+      totalCost,
+      delLit,
+      usedLit
     };
   };
 
@@ -597,10 +649,19 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
     e.preventDefault();
     if (!selectedFarmer) return;
 
-    const { totalHours, hoursCost, remainingLit, dieselAdjustmentCost, totalCost } = getWateringCostDetails();
+    const costDetails = getWateringCostDetails();
+    if (costDetails.duration.totalMinutes === 0) {
+      return alert("الرجاء تحديد زمن السقاية");
+    }
 
     setIsSaving(true);
-    const noteStr = wateringNote.trim() || `سقاية مائية من الساعة ${startTime} إلى ${endTime} بمجموع ${totalHours} ساعة. ديزل واصل: ${dieselDelivered || 0}L، مستخدم: ${dieselUsed || 0}L، متبقي: ${remainingLit}L`;
+    let noteStr = "";
+
+    if (registrationMode === "detailed") {
+      noteStr = wateringNote.trim() || `سقاية مائية من الساعة ${startTime} إلى ${endTime} بمجموع ${costDetails.duration.formatted}. ديزل واصل: ${costDetails.delLit}L، مستخدم: ${costDetails.usedLit}L، متبقي: ${costDetails.remainingLit}L`;
+    } else {
+      noteStr = fastNotes.trim() || `سقاية (${fastPowerSource}) بمجموع ${costDetails.duration.formatted}`;
+    }
 
     const tempTxId = "temp-watering-" + Date.now();
     const newTx: Transaction = {
@@ -608,22 +669,22 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
       userId: currentUser?.uid || "",
       personId: selectedFarmer.id,
       type: "well_watering",
-      amount: totalCost,
+      amount: costDetails.totalCost,
       note: noteStr,
       section: "well_customers",
       wellId: selectedWellId || "default_well",
       createdAt: new Date(wateringDate + "T12:00:00"),
       wateringDetails: {
-        startTime,
-        endTime,
-        totalHours,
-        hoursCost,
-        dieselDelivered: dieselDelivered !== "" ? Number(dieselDelivered) : 0,
-        dieselUsed: dieselUsed !== "" ? Number(dieselUsed) : 0,
-        dieselRemaining: remainingLit,
-        dieselAdjustmentCost,
-        hourlyRate: customHourlyRate !== "" ? Number(customHourlyRate) : settings.hourlyWellRate,
-        diesel20LPrice: customDieselPrice !== "" ? Number(customDieselPrice) : settings.diesel20LPrice
+        startTime: registrationMode === "detailed" ? startTime : "",
+        endTime: registrationMode === "detailed" ? endTime : "",
+        totalHours: Number((costDetails.duration.totalMinutes / 60).toFixed(4)),
+        hoursCost: costDetails.hoursCost,
+        dieselDelivered: costDetails.delLit,
+        dieselUsed: costDetails.usedLit,
+        dieselRemaining: costDetails.remainingLit,
+        dieselAdjustmentCost: costDetails.dieselAdjustmentCost,
+        hourlyRate: costDetails.rateHour,
+        diesel20LPrice: registrationMode === "detailed" && customDieselPrice !== "" ? Number(customDieselPrice) : settings.diesel20LPrice
       }
     } as any;
 
@@ -651,7 +712,7 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
       return next;
     });
 
-    const newBalance = selectedFarmer.balance + totalCost + (Number(previousBalance) || 0);
+    const newBalance = selectedFarmer.balance + costDetails.totalCost + (Number(previousBalance) || 0);
     const updatedFarmer = { ...selectedFarmer, balance: newBalance };
     setSelectedFarmer(updatedFarmer);
     setFarmers(prev => prev.map(f => f.id === selectedFarmer.id ? updatedFarmer : f));
@@ -679,22 +740,22 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
       personId: selectedFarmer.id,
       type: "well_watering",
       wellId: selectedWellId || "default_well",
-      amount: totalCost,
+      amount: costDetails.totalCost,
       note: noteStr,
       section: "well_customers",
       createdAt: new Date(wateringDate + "T12:00:00"),
       // Store granular details for transparency and sharing
       wateringDetails: {
-        startTime,
-        endTime,
-        totalHours,
-        hoursCost,
-        dieselDelivered: dieselDelivered !== "" ? Number(dieselDelivered) : 0,
-        dieselUsed: dieselUsed !== "" ? Number(dieselUsed) : 0,
-        dieselRemaining: remainingLit,
-        dieselAdjustmentCost,
-        hourlyRate: customHourlyRate !== "" ? Number(customHourlyRate) : settings.hourlyWellRate,
-        diesel20LPrice: customDieselPrice !== "" ? Number(customDieselPrice) : settings.diesel20LPrice
+        startTime: registrationMode === "detailed" ? startTime : "",
+        endTime: registrationMode === "detailed" ? endTime : "",
+        totalHours: Number((costDetails.duration.totalMinutes / 60).toFixed(4)),
+        hoursCost: costDetails.hoursCost,
+        dieselDelivered: costDetails.delLit,
+        dieselUsed: costDetails.usedLit,
+        dieselRemaining: costDetails.remainingLit,
+        dieselAdjustmentCost: costDetails.dieselAdjustmentCost,
+        hourlyRate: costDetails.rateHour,
+        diesel20LPrice: registrationMode === "detailed" && customDieselPrice !== "" ? Number(customDieselPrice) : settings.diesel20LPrice
       }
     }).catch((err) => {
       console.error("Failed to add watering transaction offline/online:", err);
@@ -710,32 +771,47 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
     setIsWateringModalOpen(false);
 
     // Prepare Share Message and trigger WhatsApp Modal
-    const farakSign = dieselAdjustmentCost > 0 
-      ? `+${dieselAdjustmentCost.toLocaleString('en-US')} ريال (عجز)` 
-      : dieselAdjustmentCost < 0 
-        ? `-${Math.abs(dieselAdjustmentCost).toLocaleString('en-US')} ريال (فائض)` 
+    const farakSign = costDetails.dieselAdjustmentCost > 0
+      ? `+${costDetails.dieselAdjustmentCost.toLocaleString('en-US')} ريال (عجز)`
+      : costDetails.dieselAdjustmentCost < 0
+        ? `-${Math.abs(costDetails.dieselAdjustmentCost).toLocaleString('en-US')} ريال (فائض)`
         : "0 ريال";
 
     const wDateObj = new Date(wateringDate);
     const dayName = isNaN(wDateObj.getTime()) ? "" : wDateObj.toLocaleDateString("ar-YE", { weekday: 'long' }) + "، ";
 
-    const msg = `💧 *إشعار سقاية* 💧
+    let msg = "";
+    if (registrationMode === "detailed") {
+      msg = `💧 *إشعار سقاية* 💧
 👤 *العميل:* ${selectedFarmer.name}
 📅 *التاريخ:* ${dayName}${wateringDate}
 
-⏱️ *الوقت:* من ${startTime || "-"} إلى ${endTime || "-"} (${totalHours} ساعة)
-💵 *قيمة الوقت:* ${hoursCost.toLocaleString('en-US')} ريال
+⏱️ *الوقت:* من ${startTime || "-"} إلى ${endTime || "-"} (${costDetails.duration.formatted})
+💵 *قيمة الوقت:* ${costDetails.hoursCost.toLocaleString('en-US')} ريال
 ⚖️ *فارق الديزل:* ${farakSign}
-💸 *مبلغ السقاية:* ${totalCost.toLocaleString('en-US')} ريال
+💸 *مبلغ السقاية:* ${costDetails.totalCost.toLocaleString('en-US')} ريال
 
 📈 *صافي الحساب:* ${newBalance.toLocaleString('en-US')} ريال (عليه)
 
 ⛽ *الديزل:*
-📥 واصل: ${dieselDelivered || 0} لتر
-⚡ مستهلك: ${dieselUsed || 0} لتر
-🛢️ متبقي: ${remainingLit} لتر
+📥 واصل: ${costDetails.delLit} لتر
+⚡ مستهلك: ${costDetails.usedLit} لتر
+🛢️ متبقي: ${costDetails.remainingLit} لتر
 
 ✨ *مشروع:* ${settings.wellName}`;
+    } else {
+      msg = `💧 *إشعار سقاية* 💧
+👤 *العميل:* ${selectedFarmer.name}
+📅 *التاريخ:* ${dayName}${wateringDate}
+
+⚡ *نوع السقاية:* ${fastPowerSource}
+⏱️ *الوقت:* ${costDetails.duration.formatted}
+💸 *مبلغ السقاية:* ${costDetails.totalCost.toLocaleString('en-US')} ريال
+
+📈 *صافي الحساب:* ${newBalance.toLocaleString('en-US')} ريال (عليه)
+
+✨ *مشروع:* ${settings.wellName}`;
+    }
     
     setShareMessage(msg);
     setIsShareModalOpen(true);
@@ -748,6 +824,11 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
     setCustomHourlyRate("");
     setCustomDieselPrice("");
     setWateringNote("");
+    setFastHours("");
+    setFastMinutes("");
+    setFastHourlyRate("");
+    setFastNotes("");
+    setFastPowerSource("ديزل");
   };
 
   // Save Cash Payment Transaction
@@ -1653,8 +1734,36 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
                   </div>
                 </div>
 
-                {/* Time Range */}
-                <div className="grid grid-cols-1 gap-3">
+                {/* Registration Mode Toggle */}
+                <div className="flex bg-slate-100 p-1 rounded-2xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRegistrationMode("detailed")}
+                    className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${
+                      registrationMode === "detailed"
+                        ? "bg-white text-cyan-700 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    تسجيل مفصل
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegistrationMode("fast")}
+                    className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${
+                      registrationMode === "fast"
+                        ? "bg-white text-cyan-700 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    التسجيل السريع
+                  </button>
+                </div>
+
+                {registrationMode === "detailed" ? (
+                  <>
+                    {/* Time Range */}
+                    <div className="grid grid-cols-1 gap-3">
                   {/* وقت البدء */}
                   <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 space-y-2">
                     <span className="text-sm font-black text-slate-500 block">وقت البدء (من الساعة)</span>
@@ -1849,21 +1958,6 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
                   </div>
                 </div>
 
-                {/* Previous Balance Add-on */}
-                <div>
-                  <label className="text-xs font-black text-slate-500 block mb-1">مبلغ دين سابق (من بئر غير مسجل)</label>
-                  <div className="bg-slate-50 border border-slate-150 rounded-2xl px-3 flex items-center gap-2 focus-within:border-cyan-500 transition">
-                    <DollarSign size={16} className="text-slate-400" />
-                    <input
-                      type="number"
-                      placeholder="اختياري - يضاف للرصيد"
-                      value={previousBalance}
-                      onChange={(e) => { const val = toEnglishDigits(e.target.value); setPreviousBalance(val !== "" ? Number(val) : ""); }}
-                      className="w-full py-3.5 bg-transparent text-xs font-bold outline-none text-red-500"
-                    />
-                  </div>
-                </div>
-
                 {/* Overrides and custom rates toggles or collapse */}
                 <div className="pt-2">
                   <span className="text-xs font-black text-slate-400 block mb-1">تخصيص أسعار السقاية (تخطي الافتراضي):</span>
@@ -1900,25 +1994,108 @@ export default function WellProjectView({ currentUser, onGoBack, selectedWellId 
                     className="w-full p-3.5 bg-slate-50 border border-slate-150 rounded-2xl text-xs font-bold outline-none"
                   />
                 </div>
+                  </>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Fast Power Source */}
+                    <div>
+                      <label className="text-xs font-black text-slate-500 block mb-1">مصدر السقاية</label>
+                      <select
+                        value={fastPowerSource}
+                        onChange={(e) => setFastPowerSource(e.target.value)}
+                        className="w-full p-3.5 bg-slate-50 border border-slate-150 rounded-2xl text-sm font-bold outline-none text-slate-700"
+                      >
+                        <option value="ديزل">ديزل</option>
+                        <option value="طاقة شمسية">طاقة شمسية</option>
+                        <option value="كهرباء حكومية">كهرباء حكومية</option>
+                      </select>
+                    </div>
+
+                    {/* Fast Time (Hours and Minutes) */}
+                    <div>
+                      <label className="text-xs font-black text-slate-500 block mb-1">الزمن (ساعات / دقائق)</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="الساعات..."
+                          value={fastHours}
+                          onChange={(e) => setFastHours(toEnglishDigits(e.target.value))}
+                          className="w-1/2 px-4 py-3 bg-slate-50 border border-slate-150 rounded-2xl text-slate-800 font-bold focus:bg-white outline-none text-center font-mono"
+                        />
+                        <input
+                          type="number"
+                          placeholder="الدقائق..."
+                          value={fastMinutes}
+                          onChange={(e) => setFastMinutes(toEnglishDigits(e.target.value))}
+                          max={59}
+                          className="w-1/2 px-4 py-3 bg-slate-50 border border-slate-150 rounded-2xl text-slate-800 font-bold focus:bg-white outline-none text-center font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Fast Rate */}
+                    <div>
+                      <label className="text-xs font-black text-slate-500 block mb-1">سعر الساعة المتفق عليه (تخطي الافتراضي)</label>
+                      <input
+                        type="number"
+                        placeholder={`ساعة البئر (${toArabicDigits(settings.hourlyWellRate)})`}
+                        value={fastHourlyRate}
+                        onChange={(e) => setFastHourlyRate(toEnglishDigits(e.target.value))}
+                        className="w-full p-3.5 bg-slate-50 border border-slate-150 rounded-2xl text-sm font-bold outline-none"
+                      />
+                    </div>
+
+                    {/* Fast Notes */}
+                    <div>
+                      <label className="text-xs font-black text-slate-500 block mb-1">ملاحظات (اختياري)</label>
+                      <input
+                        type="text"
+                        value={fastNotes}
+                        onChange={(e) => setFastNotes(e.target.value)}
+                        placeholder="تفاصيل إضافية..."
+                        className="w-full p-3.5 bg-slate-50 border border-slate-150 rounded-2xl text-xs font-bold outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Previous Balance Add-on */}
+                <div>
+                  <label className="text-xs font-black text-slate-500 block mb-1">مبلغ دين سابق (من بئر غير مسجل)</label>
+                  <div className="bg-slate-50 border border-slate-150 rounded-2xl px-3 flex items-center gap-2 focus-within:border-cyan-500 transition">
+                    <DollarSign size={16} className="text-slate-400" />
+                    <input
+                      type="number"
+                      placeholder="اختياري - يضاف للرصيد"
+                      value={previousBalance}
+                      onChange={(e) => { const val = toEnglishDigits(e.target.value); setPreviousBalance(val !== "" ? Number(val) : ""); }}
+                      className="w-full py-3.5 bg-transparent text-xs font-bold outline-none text-red-500"
+                    />
+                  </div>
+                </div>
 
                 {/* Calculation breakdown */}
                 <div className="p-4 bg-cyan-50/50 rounded-2xl border border-cyan-100 text-xs space-y-2 font-bold text-slate-700 mt-2">
                   <div className="flex justify-between">
-                    <span>قيمة الساعات:</span>
+                    <span>قيمة الساعات / الزمن:</span>
                     <span>{toArabicDigits(getWateringCostDetails().hoursCost)} ريال</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>الديزل المتبقي:</span>
-                    <span className={getWateringCostDetails().remainingLit >= 0 ? "text-emerald-600" : "text-red-500"}>
-                      {toArabicDigits(getWateringCostDetails().remainingLit)} لتر
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>تسوية فارق الديزل:</span>
-                    <span className={getWateringCostDetails().dieselAdjustmentCost >= 0 ? "text-red-500" : "text-emerald-600"}>
-                      {getWateringCostDetails().dieselAdjustmentCost > 0 ? `+${toArabicDigits(getWateringCostDetails().dieselAdjustmentCost)} ريال (عليه)` : `${toArabicDigits(getWateringCostDetails().dieselAdjustmentCost)} ريال (خصم له)`}
-                    </span>
-                  </div>
+                  {registrationMode === "detailed" && (
+                    <>
+                      <div className="flex justify-between">
+                        <span>الديزل المتبقي:</span>
+                        <span className={getWateringCostDetails().remainingLit >= 0 ? "text-emerald-600" : "text-red-500"}>
+                          {toArabicDigits(getWateringCostDetails().remainingLit)} لتر
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>تسوية فارق الديزل:</span>
+                        <span className={getWateringCostDetails().dieselAdjustmentCost >= 0 ? "text-red-500" : "text-emerald-600"}>
+                          {getWateringCostDetails().dieselAdjustmentCost > 0 ? `+${toArabicDigits(getWateringCostDetails().dieselAdjustmentCost)} ريال (عليه)` : `${toArabicDigits(getWateringCostDetails().dieselAdjustmentCost)} ريال (خصم له)`}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between pt-2 border-t border-cyan-200 font-black text-slate-800 text-sm">
                     <span>المبلغ المستحق الإجمالي:</span>
                     <span className="text-cyan-700">{toArabicDigits(getWateringCostDetails().totalCost)} ريال</span>
