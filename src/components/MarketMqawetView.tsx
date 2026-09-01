@@ -4,6 +4,7 @@ import { db } from "../firebase";
 import { Person, MarketBatch, MarketMqawetItem, UserProfile } from "../types";
 import { ArrowRight, Plus, Save, Trash2, Printer, Search, Phone, User, Package, Leaf, Store } from "lucide-react";
 import { toEnglishDigits } from "../utils/numberUtils";
+import { Contacts } from "@capacitor-community/contacts";
 
 const toArabicDigits = (num: number | string) => {
   return typeof num === "number" ? num.toLocaleString("en-US") : num;
@@ -38,6 +39,10 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   const [rawiFilter, setRawiFilter] = useState("ALL");
   const [mqawetFilter, setMqawetFilter] = useState("ALL");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Dropdown States
+  const [openRawiDropdown, setOpenRawiDropdown] = useState(false);
+  const [openMqawetDropdownIndex, setOpenMqawetDropdownIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -174,6 +179,41 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
         return person.balance; // This is the real Ledger balance!
     }
     return debt;
+  };
+
+  const pickContact = async (callback: (name: string, phone: string) => void) => {
+    try {
+      const permission = await Contacts.requestPermissions();
+      if (permission.contacts !== "granted") {
+        alert("يرجى منح صلاحية الوصول لجهات الاتصال من إعدادات الجهاز.");
+        return;
+      }
+      const result = await Contacts.pickContact({
+        projection: { name: true, phones: true }
+      });
+      if (result.contact) {
+        const name = result.contact.name?.display || "";
+        const phone = result.contact.phones?.[0]?.number || "";
+        callback(name, phone);
+      }
+    } catch (e) {
+      console.error("Error picking contact:", e);
+      // Ignore if user cancelled or not on a supported platform
+    }
+  };
+
+  const handlePickRawiContact = () => {
+    pickContact((name, phone) => {
+      if (name) setRawiName(name);
+      if (phone) setRawiPhone(toEnglishDigits(phone.replace(/[^0-9+]/g, '')));
+    });
+  };
+
+  const handlePickMqawetContact = (index: number) => {
+    pickContact((name, phone) => {
+      if (name) handleUpdateMqawetRow(index, "name", name);
+      if (phone) handleUpdateMqawetRow(index, "phone", toEnglishDigits(phone.replace(/[^0-9+]/g, '')));
+    });
   };
 
   const startNewBatch = () => {
@@ -342,6 +382,88 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
     }
   };
 
+  const handleDeleteBatch = async (batchId: string) => {
+    const confirmDelete = window.confirm("هل أنت متأكد من حذف هذه العملية؟ سيتم حذف جميع البيانات وعكس الحسابات المرتبطة بها.");
+    if (!confirmDelete) return;
+
+    const b = batches.find(x => x.id === batchId);
+    if (!b) return;
+
+    setIsSaving(true);
+    try {
+      if (b.status === "in_progress") {
+        // Just delete the batch, no ledger changes
+        await updateDoc(doc(db, "market_batches", batchId), { status: "deleted" }); // Or actual delete
+      } else if (b.status === "completed") {
+        // Need to reverse ledger transactions
+        const batchRef = writeBatch(db);
+
+        // 1. Reverse Rawi (Supplier)
+        let totalVal = b.rawiQty * b.rawiPrice;
+        let commVal = totalVal * (b.commRawiPct / 100);
+        let taxVal = totalVal * (b.taxPct / 100);
+        let rNet = totalVal - commVal - taxVal;
+
+        if (b.rawiId) {
+          const rawiPerson = persons.find(p => p.id === b.rawiId);
+          if (rawiPerson) {
+             // He was credited (-), so we add back (+)
+             batchRef.update(doc(db, "persons", b.rawiId), { balance: rawiPerson.balance + rNet });
+
+             // Add reversing transaction
+             const rTxRef = doc(collection(db, "transactions"));
+             batchRef.set(rTxRef, {
+                userId: currentUser.uid,
+                personId: b.rawiId,
+                type: "debt", // عكس credit
+                amount: rNet,
+                note: `عكس قيد تسوية مقوت السوق (إلغاء شحنة ${b.date})`,
+                section: "suppliers",
+                createdAt: serverTimestamp()
+             });
+          }
+        }
+
+        // 2. Reverse Mqawets (Customers)
+        for (const m of b.mqawetList) {
+          if (m.personId) {
+            const mPerson = persons.find(p => p.id === m.personId);
+            if (mPerson) {
+              // He was debited (+), so we subtract (-)
+              batchRef.update(doc(db, "persons", m.personId), { balance: mPerson.balance - m.totalRequired });
+
+              // Add reversing transaction
+              const mTxRef = doc(collection(db, "transactions"));
+              batchRef.set(mTxRef, {
+                 userId: currentUser.uid,
+                 personId: m.personId,
+                 type: "credit", // عكس debt
+                 amount: m.totalRequired,
+                 note: `عكس قيد تسوية مقوت السوق (إلغاء شحنة ${b.date})`,
+                 section: "customers",
+                 createdAt: serverTimestamp()
+              });
+            }
+          }
+        }
+
+        // Delete the batch doc entirely or mark as deleted
+        batchRef.delete(doc(db, "market_batches", batchId));
+        await batchRef.commit();
+        alert("تم الحذف وعكس القيود بنجاح!");
+      }
+
+      if (activeBatchId === batchId) {
+        setActiveBatchId(null);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("حدث خطأ أثناء محاولة الحذف");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const shareRawiWhatsApp = (b: MarketBatch) => {
       let totalVal = b.rawiQty * b.rawiPrice;
       let commVal = totalVal * (b.commRawiPct / 100);
@@ -459,7 +581,7 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   const rawiNames = Array.from(new Set(batches.filter(x => x.rawiName).map(x => x.rawiName)));
   const targetRawiOps = rawiFilter === "ALL" ? batches.filter(x => x.rawiName) : batches.filter(x => x.rawiName === rawiFilter);
 
-  const mqawetNames = Array.from(new Set(batches.flatMap(op => op.mqawetList.filter(m => m.name).map(m => m.name))));
+  const mqawetNames = Array.from(new Set(batches.flatMap(op => op.mqawetList.filter(m => m.name).map(m => m.name)))) as string[];
 
   let mqawetGroups: any = {};
   batches.forEach(op => {
@@ -577,16 +699,39 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                   <label className="text-xs font-black text-slate-500 block mb-1.5">التاريخ</label>
                   <input type="date" value={opDate} onChange={(e) => setOpDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none focus:border-amber-500" />
                 </div>
-                <div className="col-span-2 relative">
+                <div className="col-span-2">
                   <label className="text-xs font-black text-slate-500 block mb-1.5">اسم الرعوي</label>
-                  <input type="text" list="rawiList" value={rawiName} onChange={(e) => {
-                    setRawiName(e.target.value);
-                    const exist = persons.find(p => p.name === e.target.value && p.type === "suppliers");
-                    if(exist && exist.phone) setRawiPhone(exist.phone);
-                  }} placeholder="اسم المورد..." className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none focus:border-amber-500" />
-                  <datalist id="rawiList">
-                    {persons.filter(p => p.type === "suppliers").map(p => <option key={p.id} value={p.name} />)}
-                  </datalist>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={rawiName}
+                        onFocus={() => setOpenRawiDropdown(true)}
+                        onBlur={() => setTimeout(() => setOpenRawiDropdown(false), 200)}
+                        onChange={(e) => {
+                          setRawiName(e.target.value);
+                          setOpenRawiDropdown(true);
+                          const exist = persons.find(p => p.name === e.target.value && p.type === "suppliers");
+                          if(exist && exist.phone) setRawiPhone(exist.phone);
+                        }}
+                        placeholder="اسم المورد..."
+                        className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                      />
+                      {openRawiDropdown && (
+                        <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto mt-1 py-1">
+                          {persons.filter(p => p.type === "suppliers" && (p.name.includes(rawiName) || p.phone?.includes(rawiName))).map(p => (
+                            <div key={p.id} onClick={() => { setRawiName(p.name); setRawiPhone(p.phone || ""); setOpenRawiDropdown(false); }} className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0 flex justify-between items-center">
+                              <span>{p.name}</span>
+                              {p.phone && <span className="text-[10px] text-slate-400" dir="ltr">{p.phone}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={handlePickRawiContact} className="w-12 flex items-center justify-center bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition shrink-0" title="اختيار من جهات الاتصال">
+                      <Phone size={18} />
+                    </button>
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs font-black text-slate-500 block mb-1.5">رقم الجوال (اختياري)</label>
@@ -629,12 +774,61 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                   <div key={idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3">
                     <div className="flex gap-2 mb-2">
                       <div className="flex-1 relative">
-                        <input type="text" list="mqList" placeholder="اسم المقوت..." value={m.name} onChange={(e) => handleUpdateMqawetRow(idx, "name", e.target.value)} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500" />
+                        <input
+                          type="text"
+                          placeholder="اسم المقوت..."
+                          value={m.name}
+                          onFocus={() => setOpenMqawetDropdownIndex(idx)}
+                          onBlur={() => setTimeout(() => setOpenMqawetDropdownIndex(null), 200)}
+                          onChange={(e) => {
+                            handleUpdateMqawetRow(idx, "name", e.target.value);
+                            setOpenMqawetDropdownIndex(idx);
+                          }}
+                          className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                        />
+                        {openMqawetDropdownIndex === idx && (
+                          <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto mt-1 py-1">
+                            {persons
+                              .filter(p => p.type === "customers" && (p.name.includes(m.name) || p.phone?.includes(m.name)))
+                              .map(p => (
+                              <div
+                                key={p.id}
+                                onClick={() => {
+                                  handleUpdateMqawetRow(idx, "name", p.name);
+                                  handleUpdateMqawetRow(idx, "phone", p.phone || "");
+                                  setOpenMqawetDropdownIndex(null);
+                                }}
+                                className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0 flex justify-between items-center"
+                              >
+                                <span>{p.name}</span>
+                                {p.phone && <span className="text-[10px] text-slate-400" dir="ltr">{p.phone}</span>}
+                              </div>
+                            ))}
+                            {/* Unique names from batches that aren't in persons list yet */}
+                            {mqawetNames
+                              .filter(n => n.includes(m.name) && !persons.some(p => p.type === "customers" && p.name === n))
+                              .map(n => (
+                              <div
+                                key={n}
+                                onClick={() => {
+                                  handleUpdateMqawetRow(idx, "name", n);
+                                  setOpenMqawetDropdownIndex(null);
+                                }}
+                                className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm font-bold border-b border-slate-50 last:border-0"
+                              >
+                                {n}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="w-24 shrink-0">
+                      <button onClick={() => handlePickMqawetContact(idx)} className="w-10 flex items-center justify-center bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition shrink-0" title="اختيار من جهات الاتصال">
+                        <Phone size={16} />
+                      </button>
+                      <div className="w-20 shrink-0">
                         <input type="number" placeholder="الكمية" value={m.qty || ""} onChange={(e) => handleUpdateMqawetRow(idx, "qty", e.target.value ? Number(toEnglishDigits(e.target.value)) : "")} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-bold outline-none focus:border-amber-500 text-center" />
                       </div>
-                      <button onClick={() => handleRemoveMqawetRow(idx)} className="w-10 flex items-center justify-center bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition shrink-0">
+                      <button onClick={() => handleRemoveMqawetRow(idx)} className="w-10 flex items-center justify-center bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition shrink-0" title="حذف المقوت">
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -644,16 +838,13 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                       <span>إجمالي المطلوب: <span className="text-amber-600">{toArabicDigits(m.totalRequired)}</span></span>
                     </div>
                     {m.name && (
-                      <div className="mt-1 text-[10px] font-bold text-indigo-500">
-                         السحبيات السابقة للمقوت: {toArabicDigits(getMqawetHistoricalDebt(m.name, activeBatchId || undefined))} ريال
+                      <div className="mt-1 text-[10px] font-bold text-indigo-500 flex justify-between">
+                         <span>السحبيات السابقة للمقوت: {toArabicDigits(getMqawetHistoricalDebt(m.name, activeBatchId || undefined))} ريال</span>
+                         {m.phone && <span dir="ltr">{m.phone}</span>}
                       </div>
                     )}
                   </div>
                 ))}
-                <datalist id="mqList">
-                  {persons.filter(p => p.type === "customers").map(p => <option key={p.id} value={p.name} />)}
-                  {mqawetNames.map(n => <option key={n} value={n} />)}
-                </datalist>
 
                 <button onClick={handleAddMqawetRow} className="w-full py-2.5 border-2 border-dashed border-slate-300 text-slate-500 font-bold rounded-xl hover:bg-slate-50 transition text-xs flex justify-center items-center gap-1">
                   <Plus size={14} /> إضافة مقوت آخر
@@ -702,6 +893,16 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                 >
                   إغلاق وتصفية نهائية (ترحيل للحسابات)
                 </button>
+                {activeBatchId && (
+                  <button
+                    onClick={() => handleDeleteBatch(activeBatchId)}
+                    disabled={isSaving}
+                    className="w-full py-3 text-rose-500 font-black rounded-2xl hover:bg-rose-50 transition border border-transparent hover:border-rose-200 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={18} />
+                    حذف العملية نهائياً
+                  </button>
+                )}
               </div>
 
             </div>
@@ -769,9 +970,14 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                            </div>
                         </div>
 
-                        <button onClick={() => shareRawiWhatsApp(op)} className="w-full mt-4 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
-                           مشاركة التصفية عبر واتساب
-                        </button>
+                        <div className="flex gap-2 mt-4">
+                           <button onClick={() => handleDeleteBatch(op.id)} className="w-12 flex items-center justify-center bg-rose-50 text-rose-500 font-black rounded-xl hover:bg-rose-100 transition shadow-sm">
+                              <Trash2 size={18} />
+                           </button>
+                           <button onClick={() => shareRawiWhatsApp(op)} className="flex-1 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
+                              مشاركة التصفية عبر واتساب
+                           </button>
+                        </div>
                      </div>
                    );
                 })
