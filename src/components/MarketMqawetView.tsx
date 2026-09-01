@@ -44,6 +44,8 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   const [openRawiDropdown, setOpenRawiDropdown] = useState(false);
   const [openMqawetDropdownIndex, setOpenMqawetDropdownIndex] = useState<number | null>(null);
 
+  const [messageTemplates, setMessageTemplates] = useState<any[]>([]);
+
   useEffect(() => {
     if (!currentUser) return;
 
@@ -62,9 +64,16 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       setBatches(data);
     });
 
+    // Fetch Templates
+    const tQ = query(collection(db, "message_templates"), where("userId", "==", currentUser.uid));
+    const unsubTemplates = onSnapshot(tQ, (snap) => {
+      setMessageTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     return () => {
       unsubPersons();
       unsubBatches();
+      unsubTemplates();
     };
   }, [currentUser]);
 
@@ -182,14 +191,49 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   };
 
   const pickContact = async (callback: (name: string, phone: string) => void) => {
+    // Prevent App Lock overlay from dismissing the app during intent
+    localStorage.setItem("ignore_app_lock", "true");
+    const clearLockIgnore = setTimeout(() => {
+      localStorage.removeItem("ignore_app_lock");
+    }, 3000);
+
+    // 0. Use Native Android Bridge if present (main priority for standard app wrappers)
+    if ((window as any).AndroidContacts && typeof (window as any).AndroidContacts.pickContact === "function") {
+      (window as any).onAndroidContactSelected = (name: string, phone: string) => {
+        localStorage.removeItem("ignore_app_lock");
+        clearTimeout(clearLockIgnore);
+        if (name === "ERROR") {
+          alert("⚠️ حدث خطأ أثناء جلب جهة الاتصال");
+        } else if (name !== "CANCELLED") {
+          let cleanedPhone = phone || "";
+          if (cleanedPhone) {
+            cleanedPhone = cleanedPhone.replace(/[\s-()]/g, "");
+            if (cleanedPhone.startsWith("00")) cleanedPhone = "+" + cleanedPhone.substring(2);
+          }
+          callback(name, cleanedPhone);
+        }
+      };
+      try {
+        (window as any).AndroidContacts.pickContact();
+      } catch (err: any) {
+        console.error("AndroidContacts interface call failed:", err);
+        localStorage.removeItem("ignore_app_lock");
+        clearTimeout(clearLockIgnore);
+      }
+      return;
+    }
+
+    // 1. Capacitor Native Plugin fallback
     try {
       if (!Contacts || !Contacts.requestPermissions) {
-        alert("ميزة جهات الاتصال مدعومة فقط في تطبيق الهاتف.");
+        alert("ميزة جهات الاتصال غير متوفرة على هذا الجهاز.");
+        localStorage.removeItem("ignore_app_lock");
         return;
       }
       const permission = await Contacts.requestPermissions();
       if (permission.contacts !== "granted") {
         alert("يرجى منح صلاحية الوصول لجهات الاتصال من إعدادات الجهاز.");
+        localStorage.removeItem("ignore_app_lock");
         return;
       }
       const result = await Contacts.pickContact({
@@ -205,6 +249,9 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       if (e?.message?.includes("implemented on web")) {
         alert("ميزة اختيار جهات الاتصال تعمل فقط من خلال تطبيق الهاتف.");
       }
+    } finally {
+      localStorage.removeItem("ignore_app_lock");
+      clearTimeout(clearLockIgnore);
     }
   };
 
@@ -471,6 +518,12 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
     }
   };
 
+  const getTemplate = (type: string) => {
+    return messageTemplates.find(t => t.type === type && t.isActive)
+           || messageTemplates.find(t => t.type === type && t.isDefault)
+           || null;
+  };
+
   const shareRawiWhatsApp = (b: MarketBatch) => {
       let totalVal = b.rawiQty * b.rawiPrice;
       let commVal = totalVal * (b.commRawiPct / 100);
@@ -479,45 +532,48 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       let distributedQty = b.mqawetList.reduce((s, m) => s + m.qty, 0);
       let remQty = b.rawiQty - distributedQty;
 
-      let msg = `*تصفية وتفريغ شحنة الأخ / ${b.rawiName}*
-`;
-      msg += `📅 *تاريخ التوريد:* ${b.date}
-`;
-      msg += `📦 *إجمالي الكمية الموردة:* (${b.rawiQty}) بسعر (${b.rawiPrice.toLocaleString()}) = ${totalVal.toLocaleString()} ريال
-`;
-      msg += `--------------------------------
-`;
-      msg += `*تفاصيل توزيع بضاعتك على المقاوتة:*
-`;
+      let msg = "";
+      const template = getTemplate("market_rawi");
 
+      let detailsStr = "";
       if (b.mqawetList.length === 0) {
-          msg += `لم يتم تصريف أي كمية حتى الآن.
-`;
+          detailsStr = "لم يتم تصريف أي كمية حتى الآن.\n";
       } else {
           b.mqawetList.forEach((m, idx) => {
-              msg += `${idx + 1}) أخذ المقوت *(${m.name})* من حسابك كمية *(${m.qty})* بحساب *(${b.rawiPrice.toLocaleString()})* = *${m.baseVal.toLocaleString()}* ريال
-`;
+              detailsStr += `${idx + 1}) أخذ المقوت *(${m.name})* من حسابك كمية *(${m.qty})* بحساب *(${b.rawiPrice.toLocaleString()})* = *${m.baseVal.toLocaleString()}* ريال\n`;
           });
       }
 
-      msg += `--------------------------------
-`;
-      msg += `📦 *المصرف:* (${distributedQty}) | *المتبقي طرفنا:* (${remQty})
-`;
-      msg += `💰 *إجمالي قيمة البضاعة:* ${totalVal.toLocaleString()} ريال
-`;
-      msg += `🔻 *يخصم عمولة المصلح (${b.commRawiPct}%):* - ${commVal.toLocaleString()} ريال
-`;
-      if (taxVal > 0) {
-          msg += `🔻 *يخصم الضريبة (${b.taxPct}%):* - ${taxVal.toLocaleString()} ريال
-`;
+      if (template) {
+         msg = template.content
+           .replace(/{الاسم}/g, b.rawiName)
+           .replace(/{التاريخ}/g, b.date)
+           .replace(/{إجمالي_الكمية}/g, b.rawiQty.toString())
+           .replace(/{سعر_الوحدة}/g, b.rawiPrice.toLocaleString())
+           .replace(/{تفاصيل_المقاوتة}/g, detailsStr)
+           .replace(/{صافي_الرعوي}/g, net.toLocaleString())
+           .replace(/{الرصيد_السابق}/g, "") // Not applicable here unless we calculate it
+           .replace(/{المبلغ_المضاف}/g, net.toLocaleString())
+           .replace(/{الرصيد_الحالي}/g, net.toLocaleString()); // simplified
+      } else {
+          // Fallback
+          msg = `*تصفية وتفريغ شحنة الأخ / ${b.rawiName}*\n`;
+          msg += `📅 *تاريخ التوريد:* ${b.date}\n`;
+          msg += `📦 *إجمالي الكمية الموردة:* (${b.rawiQty}) بسعر (${b.rawiPrice.toLocaleString()}) = ${totalVal.toLocaleString()} ريال\n`;
+          msg += `--------------------------------\n`;
+          msg += `*تفاصيل توزيع بضاعتك على المقاوتة:*\n`;
+          msg += detailsStr;
+          msg += `--------------------------------\n`;
+          msg += `📦 *المصرف:* (${distributedQty}) | *المتبقي طرفنا:* (${remQty})\n`;
+          msg += `💰 *إجمالي قيمة البضاعة:* ${totalVal.toLocaleString()} ريال\n`;
+          msg += `🔻 *يخصم عمولة المصلح (${b.commRawiPct}%):* - ${commVal.toLocaleString()} ريال\n`;
+          if (taxVal > 0) {
+              msg += `🔻 *يخصم الضريبة (${b.taxPct}%):* - ${taxVal.toLocaleString()} ريال\n`;
+          }
+          msg += `--------------------------------\n`;
+          msg += `💵 *صافي المبلغ المستحق لك بالكامل (خالص):* ${net.toLocaleString()} ريال\n\n`;
+          msg += `شاكرين تعاملكم معنا.`;
       }
-      msg += `--------------------------------
-`;
-      msg += `💵 *صافي المبلغ المستحق لك بالكامل (خالص):* ${net.toLocaleString()} ريال
-
-`;
-      msg += `شاكرين تعاملكم معنا.`;
 
       let cleanPhone = b.rawiPhone ? b.rawiPhone.replace(/[^0-9]/g, '') : '';
       if (cleanPhone.startsWith('0')) cleanPhone = '967' + cleanPhone.substring(1);
@@ -553,6 +609,167 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       window.open(url, '_self');
   };
 
+  const doPrint = (printHTML: string) => {
+    const printArea = document.getElementById("print-area");
+    if (printArea) {
+      printArea.innerHTML = printHTML;
+      setTimeout(() => {
+        if ((window as any).AndroidPrint) {
+          (window as any).AndroidPrint.print();
+        } else {
+          window.print();
+        }
+      }, 250);
+    }
+  };
+
+  const printRawiReport = (b: MarketBatch) => {
+      let totalVal = b.rawiQty * b.rawiPrice;
+      let commVal = totalVal * (b.commRawiPct / 100);
+      let taxVal = totalVal * (b.taxPct / 100);
+      let net = totalVal - commVal - taxVal;
+      let distributedQty = b.mqawetList.reduce((s, m) => s + m.qty, 0);
+      let remQty = b.rawiQty - distributedQty;
+
+      let html = `
+        <div style="direction: rtl; font-family: 'Cairo', sans-serif; padding: 20px; color: black; background: white;">
+          <h2 style="text-align:center; border-bottom: 2px solid #333; padding-bottom: 10px;">فاتورة تصفية مورد (الرعوي)</h2>
+          <div style="margin-bottom: 20px; line-height: 1.6;">
+            <strong>الرعوي:</strong> ${b.rawiName}<br/>
+            <strong>التاريخ:</strong> ${b.date}<br/>
+            <strong>الكمية الموردة:</strong> ${b.rawiQty} بسعر ${b.rawiPrice.toLocaleString()} ريال = ${totalVal.toLocaleString()} ريال
+          </div>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <thead>
+              <tr style="background-color: #f1f5f9;">
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">م</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">اسم المقوت</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">الكمية</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">القيمة</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      b.mqawetList.forEach((m, idx) => {
+        html += `
+              <tr>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${idx + 1}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.name}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.qty}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${m.baseVal.toLocaleString()} ريال</td>
+              </tr>
+        `;
+      });
+
+      html += `
+            </tbody>
+          </table>
+
+          <div style="margin-top: 20px; border: 1px solid #cbd5e1; padding: 15px; border-radius: 8px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+              <span><strong>إجمالي الكمية المصرفة:</strong> ${distributedQty}</span>
+              <span style="color: red;"><strong>المتبقي:</strong> ${remQty}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+              <span><strong>قيمة المبيعات الإجمالية:</strong></span>
+              <span>${totalVal.toLocaleString()} ريال</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px; color:red;">
+              <span><strong>عمولة المصلح (${b.commRawiPct}%):</strong></span>
+              <span>- ${commVal.toLocaleString()} ريال</span>
+            </div>
+            ${taxVal > 0 ? `<div style="display:flex; justify-content:space-between; margin-bottom:8px; color:red;">
+              <span><strong>الضريبة (${b.taxPct}%):</strong></span>
+              <span>- ${taxVal.toLocaleString()} ريال</span>
+            </div>` : ''}
+            <div style="display:flex; justify-content:space-between; margin-top:15px; padding-top:15px; border-top: 2px solid #333; font-size: 18px;">
+              <span><strong>صافي المستحق (خالص):</strong></span>
+              <span><strong>${net.toLocaleString()} ريال</strong></span>
+            </div>
+          </div>
+        </div>
+      `;
+      doPrint(html);
+  };
+
+  const printMqawetReport = (name: string) => {
+      let records: any[] = [];
+      batches.forEach(op => {
+          op.mqawetList.forEach(m => {
+              if (m.name === name) {
+                  records.push({
+                      date: op.date,
+                      rawiName: op.rawiName || 'رعوي مجهول',
+                      qty: m.qty,
+                      price: m.price,
+                      baseVal: m.baseVal,
+                      comm: m.comm,
+                      totalRequired: m.totalRequired
+                  });
+              }
+          });
+      });
+
+      if (records.length === 0) return;
+
+      let total = records.reduce((s, r) => s + r.totalRequired, 0);
+      const pExist = persons.find(p => p.name === name && p.type === "customers");
+      const actualBalance = pExist ? pExist.balance : total;
+      const diff = actualBalance - total;
+
+      let html = `
+        <div style="direction: rtl; font-family: 'Cairo', sans-serif; padding: 20px; color: black; background: white;">
+          <h2 style="text-align:center; border-bottom: 2px solid #333; padding-bottom: 10px;">كشف حساب المقوت</h2>
+          <div style="margin-bottom: 20px; font-size: 18px;">
+            <strong>اسم المقوت:</strong> ${name}
+          </div>
+          ${diff !== 0 ? `<div style="margin-bottom: 10px; padding: 10px; background-color: #f1f5f9; border-radius: 6px;">
+            <strong>رصيد أو دفعات سابقة (خارج هذه الشحنات):</strong> ${diff > 0 ? `+${diff.toLocaleString()} (عليه)` : `${diff.toLocaleString()} (له)`}
+          </div>` : ''}
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <thead>
+              <tr style="background-color: #f1f5f9;">
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">م</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">التاريخ</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">الرعوي</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">الكمية</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">السعر</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">القيمة</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">العمولة</th>
+                <th style="border: 1px solid #cbd5e1; padding: 8px;">المطلوب</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      records.forEach((r, idx) => {
+        html += `
+              <tr>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${idx + 1}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.date}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.rawiName}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.qty}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.price.toLocaleString()}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.baseVal.toLocaleString()}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center;">${r.comm.toLocaleString()}</td>
+                <td style="border: 1px solid #cbd5e1; padding: 8px; text-align:center; font-weight:bold;">${r.totalRequired.toLocaleString()}</td>
+              </tr>
+        `;
+      });
+
+      html += `
+            </tbody>
+          </table>
+          <div style="margin-top: 20px; padding: 15px; border: 2px solid #333; border-radius: 8px; font-size: 18px; display:flex; justify-content:space-between;">
+            <span><strong>الرصيد الإجمالي المطلوب سداده:</strong></span>
+            <span style="color:red;"><strong>${actualBalance.toLocaleString()} ريال</strong></span>
+          </div>
+        </div>
+      `;
+      doPrint(html);
+  };
+
   const shareMqawetWhatsApp = (name: string, phone: string) => {
       let records: any[] = [];
       batches.forEach(op => {
@@ -574,29 +791,37 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       if (records.length === 0) return;
 
       let total = records.reduce((s, r) => s + r.totalRequired, 0);
+      const pExist = persons.find(p => p.name === name && p.type === "customers");
+      const actualBalance = pExist ? pExist.balance : total;
 
-      let msg = `*كشف حساب الأخ / ${name}*
-`;
-      msg += `تحية طيبة، تفاصيل مسحوباتكم كالتالي:
-`;
-      msg += `--------------------------------
-`;
+      const template = getTemplate("market_mqawet");
+      let msg = "";
 
+      let detailsStr = "";
       records.forEach((r, idx) => {
-          msg += `${idx + 1}) *بتاريخ:* ${r.date}
-`;
-          msg += `أخذت من الرعوي *(${r.rawiName})* كمية *(${r.qty})* من حساب *(${r.price.toLocaleString()})*، القيمة *(${r.baseVal.toLocaleString()})* + عمولة *(${r.comm.toLocaleString()})*
-`;
-          msg += `👈 *المطلوب:* ${r.totalRequired.toLocaleString()} ريال
-
-`;
+          detailsStr += `${idx + 1}) *بتاريخ:* ${r.date}\n`;
+          detailsStr += `أخذت من الرعوي *(${r.rawiName})* كمية *(${r.qty})* من حساب *(${r.price.toLocaleString()})*، القيمة *(${r.baseVal.toLocaleString()})* + عمولة *(${r.comm.toLocaleString()})*\n`;
+          detailsStr += `👈 *المطلوب:* ${r.totalRequired.toLocaleString()} ريال\n\n`;
       });
 
-      msg += `--------------------------------
-`;
-      msg += `💰 *إجمالي المبلغ المطلوب سداده:* ${total.toLocaleString()} ريال
-`;
-      msg += `شاكرين حسن تعاونكم معنا.`;
+      if (template) {
+         msg = template.content
+           .replace(/{الاسم}/g, name)
+           .replace(/{التاريخ}/g, new Date().toLocaleDateString('ar-EG'))
+           .replace(/{تفاصيل_المقاوتة}/g, detailsStr)
+           .replace(/{إجمالي_المطلوب}/g, actualBalance.toLocaleString())
+           .replace(/{الرصيد_السابق}/g, "")
+           .replace(/{المبلغ_المضاف}/g, total.toLocaleString())
+           .replace(/{الرصيد_الحالي}/g, actualBalance.toLocaleString());
+      } else {
+          msg = `*كشف حساب الأخ / ${name}*\n`;
+          msg += `تحية طيبة، تفاصيل مسحوباتكم كالتالي:\n`;
+          msg += `--------------------------------\n`;
+          msg += detailsStr;
+          msg += `--------------------------------\n`;
+          msg += `💰 *الرصيد الإجمالي المطلوب سداده:* ${actualBalance.toLocaleString()} ريال\n`;
+          msg += `شاكرين حسن تعاونكم معنا.`;
+      }
 
       let cleanPhone = phone ? phone.replace(/[^0-9]/g, '') : '';
       if (cleanPhone.startsWith('0')) cleanPhone = '967' + cleanPhone.substring(1);
@@ -1001,15 +1226,18 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                            </div>
                         </div>
 
-                        <div className="flex gap-2 mt-4">
-                           <button onClick={() => handleDeleteBatch(op.id)} className="w-12 flex items-center justify-center bg-rose-50 text-rose-500 font-black rounded-xl hover:bg-rose-100 transition shadow-sm">
+                        <div className="flex gap-2 mt-4 flex-wrap sm:flex-nowrap">
+                           <button onClick={() => handleDeleteBatch(op.id)} className="w-12 py-3 flex items-center justify-center bg-rose-50 text-rose-500 font-black rounded-xl hover:bg-rose-100 transition shadow-sm">
                               <Trash2 size={18} />
                            </button>
-                           <button onClick={() => shareRawiWhatsApp(op)} className="flex-1 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
-                              مشاركة التصفية عبر واتساب
+                           <button onClick={() => printRawiReport(op)} className="w-12 py-3 flex items-center justify-center bg-indigo-50 text-indigo-500 font-black rounded-xl hover:bg-indigo-100 transition shadow-sm" title="طباعة الكشف">
+                              <Printer size={18} />
                            </button>
-                           <button onClick={() => shareRawiSMS(op)} className="w-12 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
+                           <button onClick={() => shareRawiSMS(op)} className="w-12 py-3 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
                               <span className="font-black text-[10px]">SMS</span>
+                           </button>
+                           <button onClick={() => shareRawiWhatsApp(op)} className="flex-1 min-w-[150px] py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
+                              عبر واتساب
                            </button>
                         </div>
                      </div>
@@ -1034,7 +1262,10 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
              ) : (
                 Object.keys(mqawetGroups).map(name => {
                    const data = mqawetGroups[name];
-                   const total = data.records.reduce((s: number, r: any) => s + r.totalRequired, 0);
+                   const batchTotal = data.records.reduce((s: number, r: any) => s + r.totalRequired, 0);
+                   const pExist = persons.find(p => p.name === name && p.type === "customers");
+                   const actualBalance = pExist ? pExist.balance : batchTotal;
+                   const diff = actualBalance - batchTotal;
 
                    return (
                      <div key={name} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 mb-4 border-t-4 border-t-indigo-500">
@@ -1044,6 +1275,11 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                         </div>
 
                         <div className="space-y-3 mb-4">
+                           {diff !== 0 && (
+                             <div className="bg-slate-100 border-r-4 border-slate-400 p-3 rounded-lg text-xs font-bold text-slate-600">
+                                📌 <strong>رصيد أو دفعات سابقة (خارج هذه الشحنات):</strong> {diff > 0 ? `+${diff.toLocaleString()} (عليه)` : `${diff.toLocaleString()} (له)`}
+                             </div>
+                           )}
                            {data.records.map((r: any, idx: number) => (
                               <div key={idx} className="bg-slate-50 border-r-4 border-indigo-400 p-3 rounded-lg text-xs leading-relaxed text-slate-700 font-bold border border-slate-100">
                                  📅 التاريخ: {r.date} <br/>
@@ -1057,20 +1293,23 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
                         </div>
 
                         <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-sm font-black flex justify-between items-center text-blue-800">
-                           <span>💰 إجمالي المطلوب سداده:</span>
-                           <span className="text-rose-600">{total.toLocaleString()} ريال</span>
+                           <span>💰 الرصيد الإجمالي المطلوب سداده:</span>
+                           <span className="text-rose-600">{actualBalance.toLocaleString()} ريال</span>
                         </div>
 
-                        <div className="flex gap-2 mt-4">
-                           <button onClick={() => shareMqawetWhatsApp(name, data.phone)} className="flex-1 py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
-                              مشاركة الكشف عبر واتساب
+                        <div className="flex gap-2 mt-4 flex-wrap sm:flex-nowrap">
+                           <button onClick={() => printMqawetReport(name)} className="w-12 py-3 flex items-center justify-center bg-indigo-50 text-indigo-500 font-black rounded-xl hover:bg-indigo-100 transition shadow-sm" title="طباعة الكشف">
+                              <Printer size={18} />
                            </button>
                            <button onClick={() => {
-                              let msg = `فاتورة المقوت: ${name}\nالمطلوب إجمالي: ${total.toLocaleString()} ريال\n`;
+                              let msg = `فاتورة المقوت: ${name}\nالمطلوب إجمالي: ${actualBalance.toLocaleString()} ريال\n`;
                               let url = `sms:${data.phone || ''}?body=${encodeURIComponent(msg)}`;
                               window.open(url, '_self');
-                           }} className="w-12 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
+                           }} className="w-12 py-3 flex items-center justify-center bg-blue-50 text-blue-500 font-black rounded-xl hover:bg-blue-100 transition shadow-sm" title="رسالة نصية">
                               <span className="font-black text-[10px]">SMS</span>
+                           </button>
+                           <button onClick={() => shareMqawetWhatsApp(name, data.phone)} className="flex-1 min-w-[150px] py-3 bg-[#25d366] text-white font-black rounded-xl hover:bg-[#20bd5a] transition flex items-center justify-center gap-2 shadow-sm">
+                              عبر واتساب
                            </button>
                         </div>
                      </div>

@@ -15,6 +15,8 @@ const TEMPLATE_TYPES: { value: TemplateType; label: string }[] = [
   { value: "wa_single", label: "واتساب - عملية واحدة" },
   { value: "wa_multiple", label: "واتساب - عمليات متعددة (جديدة)" },
   { value: "wa_all", label: "واتساب - كامل الكشف" },
+  { value: "market_rawi", label: "واتساب - تصفية الرعوي (مقوت السوق)" },
+  { value: "market_mqawet", label: "واتساب - كشف المقوت (مقوت السوق)" },
 ];
 
 const AVAILABLE_VARIABLES = [
@@ -29,6 +31,10 @@ const AVAILABLE_VARIABLES = [
   { code: "{التاريخ}", desc: "تاريخ اليوم" },
   { code: "{العمليات_المتعددة}", desc: "قائمة العمليات التفصيلية (للواتساب فقط)" },
   { code: "{عدد_العمليات}", desc: "عدد العمليات المضافة" },
+  { code: "{تفاصيل_المقاوتة}", desc: "تفاصيل السحبيات والتوزيع (لقسم مقوت السوق)" },
+  { code: "{إجمالي_المطلوب}", desc: "إجمالي المبلغ المطلوب (لقسم مقوت السوق)" },
+  { code: "{صافي_الرعوي}", desc: "المبلغ الخالص للرعوي (لقسم مقوت السوق)" },
+  { code: "{إجمالي_الكمية}", desc: "الكمية الموردة (لقسم مقوت السوق)" },
 ];
 
 export default function MessageTemplatesView({ currentUser, onGoBack }: Props) {
@@ -98,6 +104,24 @@ export default function MessageTemplatesView({ currentUser, onGoBack }: Props) {
         isActive: true,
         isDefault: true,
         content: `مرحباً {اللقب} {الاسم}،\n\nسجل العمليات:\n\n{العمليات_المتعددة}------------------------\nالرصيد الإجمالي الحالي: {الرصيد_الحالي} {اتجاه_الرصيد}\n\nنسعد بخدمتكم، وشكراً لثقتكم.`,
+        createdAt: new Date() as any
+      },
+      {
+        userId,
+        type: "market_rawi",
+        name: "تصفية الرعوي الافتراضي",
+        isActive: true,
+        isDefault: true,
+        content: `*تصفية وتفريغ شحنة الأخ / {الاسم}*\n📅 *التاريخ:* {التاريخ}\n📦 *إجمالي المورد:* {إجمالي_الكمية} بسعر {سعر_الوحدة}\n--------------------------------\n*تفاصيل التوزيع:*\n{تفاصيل_المقاوتة}\n--------------------------------\n💵 *صافي المستحق (خالص):* {صافي_الرعوي} ريال\n\nشاكرين تعاملكم.`,
+        createdAt: new Date() as any
+      },
+      {
+        userId,
+        type: "market_mqawet",
+        name: "كشف حساب المقوت الافتراضي",
+        isActive: true,
+        isDefault: true,
+        content: `*كشف حساب الأخ / {الاسم}*\nتحية طيبة، تفاصيل مسحوباتكم كالتالي:\n--------------------------------\n{تفاصيل_المقاوتة}--------------------------------\n💰 *الرصيد الإجمالي المطلوب سداده:* {إجمالي_المطلوب} ريال\nشاكرين حسن تعاونكم.`,
         createdAt: new Date() as any
       }
     ];
