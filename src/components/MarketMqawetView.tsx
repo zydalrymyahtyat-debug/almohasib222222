@@ -38,6 +38,12 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
   // Filter States
   const [rawiFilter, setRawiFilter] = useState("ALL");
   const [mqawetFilter, setMqawetFilter] = useState("ALL");
+
+  // Search States
+  const [rawiSearch, setRawiSearch] = useState("");
+  const [mqawetSearch, setMqawetSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
+
   const [isSaving, setIsSaving] = useState(false);
 
   // Isolated Market Customers (from market_batches)
@@ -73,7 +79,16 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
         });
      });
 
-     return Array.from(clientsMap.values());
+     const allClients = Array.from(clientsMap.values());
+
+     if (clientSearch) {
+       const sTxt = clientSearch.toLowerCase();
+       return allClients.filter(c =>
+          c.name.toLowerCase().includes(sTxt) || (c.phone && c.phone.includes(sTxt))
+       );
+     }
+
+     return allClients;
   };
 
 
@@ -809,14 +824,23 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
   // Render variables for reports
   const rawiNames = Array.from(new Set(batches.filter(x => x.rawiName).map(x => x.rawiName)));
-  const targetRawiOps = rawiFilter === "ALL" ? batches.filter(x => x.rawiName) : batches.filter(x => x.rawiName === rawiFilter);
+  let targetRawiOps = rawiFilter === "ALL" ? batches.filter(x => x.rawiName) : batches.filter(x => x.rawiName === rawiFilter);
+  if (rawiSearch) {
+    targetRawiOps = targetRawiOps.filter(op =>
+      op.rawiName?.includes(rawiSearch) || op.date.includes(rawiSearch) || op.rawiPhone?.includes(rawiSearch)
+    );
+  }
 
   const mqawetNames = Array.from(new Set(batches.flatMap(op => op.mqawetList.filter(m => m.name).map(m => m.name)))) as string[];
 
   let mqawetGroups: any = {};
   batches.forEach(op => {
       op.mqawetList.forEach(m => {
-          if (mqawetFilter === "ALL" || m.name === mqawetFilter) {
+          const matchFilter = mqawetFilter === "ALL" || m.name === mqawetFilter;
+          const searchTxt = mqawetSearch.toLowerCase();
+          const matchSearch = !mqawetSearch || m.name.toLowerCase().includes(searchTxt) || op.date.includes(searchTxt) || (m.phone && m.phone.includes(searchTxt));
+
+          if (matchFilter && matchSearch) {
               if (!mqawetGroups[m.name]) mqawetGroups[m.name] = { phone: m.phone, records: [] };
               if (m.phone && m.phone !== '-') mqawetGroups[m.name].phone = m.phone;
               mqawetGroups[m.name].records.push({
@@ -880,11 +904,25 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
       <div className="p-4 pb-24">
         {activeTab === "clients" && (
           <div className="space-y-4 max-w-2xl mx-auto">
-             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
-                <h3 className="font-black text-slate-800 text-lg flex items-center gap-2 mb-2"><User size={20} className="text-amber-500"/> أرصدة عملاء السوق (مستقلة)</h3>
-                <p className="text-xs text-slate-500 font-bold leading-relaxed">
-                   تعرض هذه الشاشة حسابات (الرعية والمقاوتة) المستنتجة من حركة شحنات التوزيع فقط، وهي مفصولة تماماً عن الحسابات العامة (سندات القبض والصرف).
-                </p>
+             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4 space-y-3">
+                <div>
+                   <h3 className="font-black text-slate-800 text-lg flex items-center gap-2 mb-2"><User size={20} className="text-amber-500"/> أرصدة عملاء السوق (مستقلة)</h3>
+                   <p className="text-xs text-slate-500 font-bold leading-relaxed">
+                      تعرض هذه الشاشة حسابات (الرعية والمقاوتة) المستنتجة من حركة شحنات التوزيع فقط، وهي مفصولة تماماً عن الحسابات العامة (سندات القبض والصرف).
+                   </p>
+                </div>
+                <div className="relative">
+                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                     <Search size={16} />
+                   </div>
+                   <input
+                     type="text"
+                     value={clientSearch}
+                     onChange={(e) => setClientSearch(e.target.value)}
+                     placeholder="بحث بالاسم أو الرقم..."
+                     className="w-full bg-slate-50 border border-slate-200 p-3 pr-10 rounded-xl text-sm font-bold outline-none focus:border-amber-500 focus:bg-white transition"
+                   />
+                </div>
              </div>
 
              <div className="space-y-3">
@@ -1189,12 +1227,26 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
         {activeTab === "rawi-rep" && (
           <div className="space-y-4 max-w-2xl mx-auto">
-             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                <label className="text-xs font-black text-slate-500 block mb-2">تحديد الرعوي (المورد)</label>
-                <select value={rawiFilter} onChange={(e) => setRawiFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none">
-                  <option value="ALL">-- كل الرعية (كشف مجمع) --</option>
-                  {rawiNames.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
+                <div>
+                   <label className="text-xs font-black text-slate-500 block mb-2">تحديد الرعوي (المورد)</label>
+                   <select value={rawiFilter} onChange={(e) => setRawiFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none">
+                     <option value="ALL">-- كل الرعية (كشف مجمع) --</option>
+                     {rawiNames.map(n => <option key={n} value={n}>{n}</option>)}
+                   </select>
+                </div>
+                <div className="relative">
+                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                     <Search size={16} />
+                   </div>
+                   <input
+                     type="text"
+                     value={rawiSearch}
+                     onChange={(e) => setRawiSearch(e.target.value)}
+                     placeholder="بحث بالاسم، التاريخ، أو الرقم..."
+                     className="w-full bg-white border border-slate-200 p-3 pr-10 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                   />
+                </div>
              </div>
 
              {targetRawiOps.length === 0 ? (
@@ -1271,12 +1323,26 @@ export default function MarketMqawetView({ currentUser, userProfile, onNavigate 
 
         {activeTab === "mqawet-rep" && (
           <div className="space-y-4 max-w-2xl mx-auto">
-             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                <label className="text-xs font-black text-slate-500 block mb-2">تحديد المقوت (السوق)</label>
-                <select value={mqawetFilter} onChange={(e) => setMqawetFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none">
-                  <option value="ALL">-- كل المقاوتة (تقرير شامل) --</option>
-                  {mqawetNames.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
+                <div>
+                   <label className="text-xs font-black text-slate-500 block mb-2">تحديد المقوت (السوق)</label>
+                   <select value={mqawetFilter} onChange={(e) => setMqawetFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold outline-none">
+                     <option value="ALL">-- كل المقاوتة (تقرير شامل) --</option>
+                     {mqawetNames.map(n => <option key={n} value={n}>{n}</option>)}
+                   </select>
+                </div>
+                <div className="relative">
+                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                     <Search size={16} />
+                   </div>
+                   <input
+                     type="text"
+                     value={mqawetSearch}
+                     onChange={(e) => setMqawetSearch(e.target.value)}
+                     placeholder="بحث بالاسم، التاريخ، أو الرقم..."
+                     className="w-full bg-white border border-slate-200 p-3 pr-10 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                   />
+                </div>
              </div>
 
              {Object.keys(mqawetGroups).length === 0 ? (
