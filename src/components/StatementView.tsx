@@ -60,6 +60,7 @@ export default function StatementView({ currentUser, personId, personName, perso
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Modals state
   const [isEditPersonOpen, setIsEditPersonOpen] = useState(false);
@@ -1003,7 +1004,27 @@ export default function StatementView({ currentUser, personId, personName, perso
 
       {/* Ledger Transactions List */}
       <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex-1">
-        <h3 className="font-extrabold text-slate-800 text-base mb-4">سجل العمليات المالية</h3>
+        <div className="flex flex-col gap-3 mb-5">
+          <h3 className="font-extrabold text-slate-800 text-base">سجل العمليات المالية</h3>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="ابحث في العمليات (المبلغ، البيان، التاريخ)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-4 pr-11 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:bg-white focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all placeholder:font-medium placeholder:text-slate-400"
+            />
+            <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 p-1 rounded-full transition"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-10 text-slate-400 font-semibold gap-2">
@@ -1014,7 +1035,17 @@ export default function StatementView({ currentUser, personId, personName, perso
           <div className="text-center py-16 text-slate-400 font-bold">لا توجد أي معاملات مقيدة في السجل لهذا الحساب.</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {transactions.map((t) => {
+            {transactions.filter((t) => {
+              const dateText = t.createdAt.toDate().toLocaleDateString("ar-EG", {
+                weekday: "long", year: "numeric", month: "numeric", day: "numeric"
+              });
+              const searchStr = searchTerm.toLowerCase();
+              return (
+                t.note?.toLowerCase().includes(searchStr) ||
+                t.amount.toString().includes(searchStr) ||
+                dateText.includes(searchStr)
+              );
+            }).map((t) => {
               const isDebit = ["debt", "withdrawal", "deduction", "qat_expense", "well_watering"].includes(t.type);
               const color = isDebit ? "text-red-500" : "text-emerald-600";
               const prefix = isDebit ? "+" : "-";
